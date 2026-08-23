@@ -1,0 +1,178 @@
+import type { Preset } from './types';
+
+export const presets: Preset[] = [
+  {
+    id: 'signal-grid',
+    name: 'Signal Grid',
+    description: 'A slow scrolling dashed grid with data beams and status blips.',
+    config: {
+      cellSize: 48,
+      background: '#05070d',
+      layers: [
+        { kind: 'dashedGrid', axis: 'both', color: '#1c2a3a', opacity: 0.6, lineWidth: 1, dash: [4, 6], scrollSpeed: 12 },
+        {
+          kind: 'travelingBeams',
+          color: '#00e5ff',
+          count: 6,
+          speed: 220,
+          length: 140,
+          thickness: 2,
+          glow: 10,
+          spawnAxis: 'both',
+        },
+        {
+          kind: 'blips',
+          shape: 'circle',
+          color: '#7cf8ff',
+          count: 10,
+          size: 8,
+          lifetimeMs: 900,
+          lifetimeJitter: 0.4,
+          gapMs: 1400,
+          gapJitter: 0.6,
+          glow: 12,
+          fill: true,
+          lineWidth: 1.5,
+          maxOpacity: 0.9,
+        },
+      ],
+    },
+  },
+  {
+    id: 'blueprint',
+    name: 'Blueprint',
+    description: 'A completely static, faint technical-drawing grid. No motion, just texture.',
+    config: {
+      cellSize: 40,
+      background: '#0a1626',
+      layers: [
+        { kind: 'dashedGrid', axis: 'both', color: '#2f5578', opacity: 0.35, lineWidth: 1, dash: [1, 0], scrollSpeed: 0 },
+      ],
+    },
+  },
+  {
+    id: 'quantum-pulse',
+    name: 'Quantum Pulse',
+    description: 'Sparse boxes breathing in and out over a faint scrolling grid.',
+    config: {
+      cellSize: 56,
+      background: '#040807',
+      layers: [
+        { kind: 'dashedGrid', axis: 'both', color: '#12332b', opacity: 0.25, lineWidth: 1, dash: [3, 5], scrollSpeed: 6 },
+        {
+          kind: 'pulseBoxes',
+          color: '#39ffc9',
+          density: 0.06,
+          minScale: 0.15,
+          maxScale: 0.85,
+          periodMs: 2600,
+          periodJitter: 0.5,
+          fill: false,
+          lineWidth: 1.5,
+          maxOpacity: 0.8,
+        },
+      ],
+    },
+  },
+  {
+    id: 'data-stream',
+    name: 'Data Stream',
+    description: 'A dense swarm of glowing beams flowing horizontally, like packets on a bus.',
+    config: {
+      cellSize: 44,
+      background: '#020617',
+      layers: [
+        {
+          kind: 'travelingBeams',
+          color: '#4da8ff',
+          count: 14,
+          speed: 320,
+          length: 110,
+          thickness: 2,
+          glow: 14,
+          spawnAxis: 'horizontal',
+        },
+      ],
+    },
+  },
+  {
+    id: 'radar-blips',
+    name: 'Radar Blips',
+    description: 'Square blips bloom in and fade across a static grid, like pings on a radar sweep.',
+    config: {
+      cellSize: 36,
+      background: '#050505',
+      layers: [
+        { kind: 'dashedGrid', axis: 'both', color: '#1f2a24', opacity: 0.4, lineWidth: 1, dash: [1, 0], scrollSpeed: 0 },
+        {
+          kind: 'blips',
+          shape: 'square',
+          color: '#7dffb0',
+          count: 22,
+          size: 10,
+          lifetimeMs: 1100,
+          lifetimeJitter: 0.5,
+          gapMs: 1800,
+          gapJitter: 0.7,
+          glow: 14,
+          fill: false,
+          lineWidth: 2,
+          maxOpacity: 0.95,
+        },
+      ],
+    },
+  },
+  {
+    id: 'hypolayer-circuit',
+    name: 'Hypolayer Circuit',
+    description: 'All four effects layered together in brand purple: grid, pulse boxes, beams, and blips.',
+    config: {
+      cellSize: 48,
+      background: '#0b0714',
+      layers: [
+        { kind: 'dashedGrid', axis: 'both', color: '#3a2159', opacity: 0.5, lineWidth: 1, dash: [5, 7], scrollSpeed: 10 },
+        {
+          kind: 'pulseBoxes',
+          color: '#c9a3ff',
+          density: 0.035,
+          minScale: 0.2,
+          maxScale: 0.9,
+          periodMs: 3200,
+          periodJitter: 0.6,
+          fill: false,
+          lineWidth: 1.5,
+          maxOpacity: 0.7,
+        },
+        {
+          kind: 'travelingBeams',
+          color: '#863bff',
+          count: 5,
+          speed: 200,
+          length: 160,
+          thickness: 2,
+          glow: 16,
+          spawnAxis: 'both',
+        },
+        {
+          kind: 'blips',
+          shape: 'circle',
+          color: '#e6d4ff',
+          count: 8,
+          size: 7,
+          lifetimeMs: 800,
+          lifetimeJitter: 0.4,
+          gapMs: 2000,
+          gapJitter: 0.7,
+          glow: 14,
+          fill: true,
+          lineWidth: 1.5,
+          maxOpacity: 0.85,
+        },
+      ],
+    },
+  },
+];
+
+export function getPreset(id: string): Preset | undefined {
+  return presets.find((p) => p.id === id);
+}

@@ -1,0 +1,41 @@
+# Explicit project name -- without this, Compose derives the project name
+# from the containing directory's basename ("database"), which collided
+# with omniverse.exchange/exchange-webapi/database/docker-compose.yml (also
+# in a directory named "database"): running one after the other recreated
+# -- not added alongside -- whatever container the other one started,
+# silently replacing eve-database's container with the exchange-db image
+# on 2026-08-22. No data was lost (the eve-db-data named volume survived
+# untouched -- only the container attached to it changed), but see the
+# project memory "docker-compose-project-name-collision" for the full story.
+name: eve-db
+
+services:
+  db:
+    build: .
+    container_name: eve-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eve
+      POSTGRES_PASSWORD: eve
+      POSTGRES_DB: eve
+    ports:
+      - "5532:5432"
+    volumes:
+      - eve-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eve -d eve"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  # Pinned to the pre-existing volume by its literal name rather than left
+  # to project-prefixing: adding the "eve-db" project name above changes
+  # the *default* volume name from "database_eve-db-data" (this file's
+  # original implicit project) to "eve-db_eve-db-data", which would silently
+  # point a freshly-named-project container at an empty new volume instead
+  # of the one holding the actual synced ESI data. `external` pins it to the
+  # real one regardless of project name.
+  eve-db-data:
+    external: true
+    name: database_eve-db-data

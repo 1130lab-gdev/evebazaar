@@ -1,0 +1,266 @@
+/*
+ * Styling specific to <GalaxyMap> and its subtree (SecurityLegend,
+ * GalaxyScene3D, StarSpheres, JumpLines) -- deliberately co-located and
+ * self-imported (see GalaxyMap.tsx) rather than living inside the app's
+ * shared index.css, so the component's own styling dependency travels
+ * with it. See the integration notes at the top of GalaxyMap.tsx for
+ * what else a host app needs to provide (CSS variables, .panel/.btn/
+ * .field primitives, env var, peer deps).
+ */
+
+.map-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.map-search-panel {
+  position: relative;
+}
+
+/* The row below the canvas: security legend (narrow) + selected
+   system/route detail (wide). */
+.map-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .map-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.map-controls {
+  display: flex;
+  flex-direction: column;
+}
+
+.map-canvas-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.map-canvas-wrap {
+  position: relative;
+  overflow: hidden;
+  /* The height prop sets a target; this keeps it from forcing the page
+     taller than the viewport on shorter screens. */
+  max-height: calc(100vh - 220px);
+}
+
+.map-reset-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+/* drei's <Html> already positions/transforms its own wrapper via the 3D
+   projection, so this deliberately has no position rule of its own. */
+.map-tooltip-3d {
+  pointer-events: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  padding: 8px 10px;
+  font-size: 12px;
+  min-width: 140px;
+  transform: translate(14px, -50%);
+  white-space: nowrap;
+}
+
+.map-detail-section {
+  margin-top: 20px;
+}
+
+.map-detail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.legend {
+  margin-top: 8px;
+}
+
+.legend-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.legend-swatch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.route-stops {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.route-stop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.route-stop--clickable {
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  padding: 3px 4px;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.route-stop--clickable:hover {
+  background: var(--bg-raised);
+}
+
+.route-stop--selected {
+  background: var(--bg-raised);
+  outline: 1px solid var(--accent-cyan);
+  outline-offset: -1px;
+}
+
+.route-mult-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0 8px;
+}
+
+.map-faction {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.map-faction-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.map-description {
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+  padding-right: 4px;
+}
+
+.map-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.map-stat-grid dt {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.map-stat-grid dd {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+}
+
+.map-gate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.map-gate-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.galaxy-search-results {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border-dim);
+}
+
+.galaxy-search-result {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.galaxy-search-result:hover {
+  background: var(--bg-raised);
+}
+
+.avoid-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.avoid-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  border: 1px solid var(--border-dim);
+  padding: 3px 6px;
+}
+
+.avoid-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}

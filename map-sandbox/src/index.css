@@ -1,0 +1,429 @@
+:root {
+  --font-display: 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, Consolas, 'SFMono-Regular', Menlo, monospace;
+
+  --bg-void: #04060c;
+  --bg-panel: #0a1220;
+  --bg-panel-alt: #0d1826;
+  --bg-raised: #101d30;
+  --border-dim: #1c2a3a;
+  --border-bright: #2c4964;
+
+  --accent-cyan: #00e5ff;
+  --accent-cyan-dim: #0a4a5c;
+  --accent-amber: #d9a441;
+  --accent-green: #39ffc9;
+  --accent-red: #ff4d6d;
+
+  --text-primary: #e9edf1;
+  --text-muted: #7c93ad;
+  --text-faint: #445a70;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-void);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: var(--accent-cyan);
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Angular HUD panel: clipped corners, thin glowing border. Carried over
+   from evebazaar.com's index.css so components built here drop into that
+   site's styling unchanged when promoted. */
+.panel {
+  position: relative;
+  background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel-alt) 100%);
+  border: 1px solid var(--border-dim);
+  clip-path: polygon(0 12px, 12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+  padding: 24px;
+}
+
+.panel--tight {
+  padding: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.panel-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-bright);
+  clip-path: polygon(0 8px, 8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+  padding: 11px 22px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--accent-cyan);
+  color: #041018;
+  border-color: var(--accent-cyan);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #33edff;
+  color: #041018;
+}
+
+input,
+select {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-void);
+  border: 1px solid var(--border-dim);
+  padding: 10px 12px;
+  width: 100%;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-cyan);
+}
+
+label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.error-text {
+  color: var(--accent-red);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(28, 42, 58, 0.5);
+}
+
+.app-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 6vw;
+  gap: 20px;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  margin-bottom: 4px;
+}
+
+.tab {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 4px;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+
+.tab--active {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+}
+
+.explorer-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .explorer-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.endpoint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.endpoint-item {
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.endpoint-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-raised);
+}
+
+.endpoint-item--active {
+  color: var(--accent-cyan);
+  border-left-color: var(--accent-cyan);
+  background: var(--bg-raised);
+}
+
+.field-help {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+.field-error {
+  margin-top: 8px;
+}
+
+.status-line {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.status-line--ok {
+  color: var(--accent-green);
+}
+
+.status-line--err {
+  color: var(--accent-red);
+}
+
+.json-viewer {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 520px;
+  overflow: auto;
+  margin: 0;
+  background: var(--bg-void);
+  border: 1px solid var(--border-dim);
+  padding: 12px;
+}
+
+.tabs--sub {
+  margin-top: 4px;
+  margin-bottom: 16px;
+}
+
+/* .map-layout, .map-controls, and everything specific to the 3D
+   <GalaxyMap> component tree lives in components/map/GalaxyMap.css,
+   imported by that component directly -- rules below this point are
+   specific to the 2D SVG map views (Browse/Route Planner tabs), which
+   aren't part of that component's portable dependency set. */
+
+.map-mode-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-mode-toggle .btn {
+  width: 100%;
+  text-align: center;
+  padding: 8px 10px;
+}
+
+.map-surface {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: var(--bg-void);
+  cursor: grab;
+  touch-action: none;
+}
+
+.map-surface:active {
+  cursor: grabbing;
+}
+
+.map-edge {
+  stroke: var(--border-bright);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.map-route-jump {
+  stroke: var(--accent-cyan);
+  stroke-width: 2.5;
+  opacity: 0.85;
+}
+
+.map-route-warp {
+  stroke: var(--accent-cyan);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+
+.map-node--clickable {
+  cursor: pointer;
+}
+
+@keyframes map-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.map-node-selected-ring {
+  fill: none;
+  stroke: var(--accent-cyan);
+  stroke-width: 2;
+  animation: map-pulse 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.map-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: var(--text-muted);
+  pointer-events: none;
+}
+
+.map-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  padding: 8px 10px;
+  font-size: 12px;
+  min-width: 140px;
+}
+
+.map-tooltip-activity {
+  margin-top: 4px;
+  font-size: 11px;
+}
+

@@ -141,3 +141,21 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Rust build artifacts
+target/
+*.rs.bk
+
+# start.sh/stop.sh runtime state (pids, logs)
+.run/
+
+# Local editor/tool config
+.claude/settings.local.json
+.DS_Store
+
+# rfesi is a separately maintained fork of a third-party crate with its own
+# repo (github.com/mccabe93/rfesi) -- not part of this project, kept out to
+# avoid duplicating someone else's project history/license here. `database`
+# depends on it via `path = "../rfesi"`; clone rfesi alongside this repo to
+# build `database` locally.
+/rfesi/

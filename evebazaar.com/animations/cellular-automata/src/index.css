@@ -1,0 +1,45 @@
+:root {
+  color-scheme: dark;
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+  --bg: #0b0c10;
+  --panel: #14161c;
+  --border: #262832;
+  --text: #e9edf1;
+  --text-dim: #9aa1ac;
+  --accent: #00e5ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 15px/1.5 var(--sans);
+  background: var(--bg);
+  color: var(--text);
+}
+
+#root {
+  width: 100%;
+  max-width: none;
+  min-height: 100svh;
+}
+
+code {
+  font-family: var(--mono);
+}
+
+button,
+select,
+input {
+  font-family: inherit;
+  color: inherit;
+}

@@ -1,0 +1,183 @@
+.app {
+  display: flex;
+  height: 100%;
+  min-height: 100svh;
+}
+
+.sidebar {
+  width: 340px;
+  flex: 0 0 auto;
+  padding: 24px 20px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.sidebar h1 {
+  font-size: 20px;
+  margin: 0 0 2px;
+}
+
+.subtitle {
+  margin: 0 0 20px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.preset-description {
+  margin: 6px 0 20px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.layer-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 12px;
+}
+
+.control-panel select,
+.field select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.control-panel textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.control-panel input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.control-panel input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.control-panel input[type='color'] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 18px 0;
+}
+
+button {
+  background: var(--accent);
+  color: #06171a;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.randomize-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.snippet {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 0 0 8px;
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  overflow: auto;
+}
+
+.hero-demo {
+  position: relative;
+  flex: 1;
+  min-height: 480px;
+  border-radius: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  background: #05070d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.scroll-hint {
+  position: sticky;
+  top: 12px;
+  align-self: center;
+  z-index: 1;
+  background: rgba(20, 22, 28, 0.85);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
+}
+
+.text-stage-spacer {
+  flex: 0 0 auto;
+  height: 55vh;
+  min-height: 220px;
+}
+
+.demo-text {
+  flex: 0 0 auto;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 32px;
+  text-wrap: balance;
+}
