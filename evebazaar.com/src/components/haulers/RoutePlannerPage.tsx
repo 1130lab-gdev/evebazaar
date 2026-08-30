@@ -1,35 +1,103 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatedText } from '@eve-anim/text-animations';
-import { useHaulers } from '../../api/catalog/useHaulers';
-import { useRuns } from '../../api/catalog/useRuns';
 import { useRoutePlanner, defaultRoutePlannerParams } from '../../api/catalog/useRoutePlanner';
 import { useArbitrage, defaultArbitrageFilters } from '../../api/catalog/useArbitrage';
 import { useCategories } from '../../api/catalog/useCategories';
 import { useSystems } from '../../api/map/useSystems';
+import { useTypeDetail } from '../../api/catalog/useTypeDetail';
+import { useOrderBook } from '../../api/catalog/useOrderBook';
 import { ArbitrageFilterPanel } from '../arbitrage/ArbitrageFilterPanel';
 import { ArbitrageGrid } from '../arbitrage/ArbitrageGrid';
-import { SaveOpportunityAsRun } from '../arbitrage/SaveOpportunityAsRun';
 import { LocationPicker } from '../arbitrage/LocationPicker';
 import { GalaxyMap } from '../map/GalaxyMap';
+import { OrderBook } from '../market/OrderBook';
+import { SHIP_PRESETS } from '../../lib/shipPresets';
+import { ISK_BUDGET_OPTIONS, formatIskBudget } from '../../lib/iskBudget';
 import { RoutePlanCard } from './RoutePlanCard';
 import type {
   ArbitrageFilters,
   ArbitrageOpportunity,
   ArbitrageSortField,
-  RoutePlan,
+  OrderFilters,
   RoutePlannerParams,
 } from '../../api/catalog/types';
 
+// The in-page order book (opened by clicking an item) is unfiltered --
+// every region, no price/qty bounds -- since there's no filter UI for it
+// here, unlike the standalone Market page.
+const UNFILTERED: OrderFilters = { regionIds: [], minPrice: null, maxPrice: null, minQty: null, securityClasses: [] };
+
+// Route searches are restricted to the four main trade hubs as a start
+// system -- an unconstrained first hop is what makes the search slow, and
+// realistic hauling almost always starts from one of these.
+const TRADE_HUBS: { name: string; systemId: number }[] = [
+  { name: 'Jita', systemId: 30000142 },
+  { name: 'Amarr', systemId: 30002187 },
+  { name: 'Dodixie', systemId: 30002659 },
+  { name: 'Hek', systemId: 30002053 },
+];
+
 type MapFocus = { sourceSystemId: number; targetSystemId: number };
-type ViewTab = 'opportunities' | 'route';
+type ViewTab = 'route' | 'opportunities';
+
+// Leg count is held at 3 for now -- search cost grows fast per extra leg.
+// The input still exists (1..3) but can't go higher. Result count is no
+// longer a knob: the server returns every profitable route it finds.
+const MAX_LEGS_CAP = 3;
 
 const activeTabStyle = { borderColor: 'var(--accent-cyan)', color: 'var(--accent-cyan)' };
 
+function clampCap(value: number, cap: number): number {
+  return Math.min(cap, Math.max(1, Math.round(value)));
+}
+
+/** Full-screen order-book overlay for one item -- the "next to the map"
+ * panel, opened by clicking an item name anywhere on this page. Its own
+ * component so `useOrderBook`/`useTypeDetail` only run while it's open. */
+function RouteItemBook({ typeId, onClose }: { typeId: number; onClose: () => void }) {
+  const { type } = useTypeDetail(typeId);
+  const { asks, bids, loading, error } = useOrderBook(typeId, UNFILTERED);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 200,
+        background: 'rgba(2, 4, 10, 0.72)',
+        backdropFilter: 'blur(2px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <div
+        className="panel panel--tight"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 'min(1200px, 94vw)', height: 'min(860px, 90vh)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      >
+        <div className="panel-header">
+          <h3 className="panel-title">{type?.name ?? `Item ${typeId}`} — order book</h3>
+          <button className="btn" onClick={onClose}>
+            Close ✕
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+          <OrderBook asks={asks} bids={bids} loading={loading} error={error} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Everything RoutePlannerParams mirrors from ArbitrageFilters field-for-field
- * (see that interface's doc comment) -- pulled out of the shared filter
- * panel's state and merged into the route-only fields right before a search
- * fires, so there's exactly one set of "which items are even eligible"
- * inputs on this page instead of two. */
+ * (see that interface's doc comment) -- pulled out of the filter panel's
+ * state and merged into the route-only fields right before a search fires,
+ * so there's exactly one set of "which items are even eligible" inputs on
+ * this page instead of two. */
 function filtersToRouteExtras(f: ArbitrageFilters) {
   return {
     nameQuery: f.nameQuery,
@@ -48,55 +116,78 @@ function filtersToRouteExtras(f: ArbitrageFilters) {
     sellSecurityClasses: f.sellSecurityClasses,
     securityProfile: f.securityProfile,
     salesTaxPct: f.salesTaxPct,
+    excludeIllegal: f.excludeIllegal,
   };
 }
 
 /**
  * Branch-and-bound multi-hop itinerary builder (see catalog-api's
- * routes/route_planner.rs) merged with the full-market arbitrage scanner --
- * one shared filter set (name/category/price/profit/volume/security, via
- * the same ArbitrageFilterPanel + ArbitrageGrid the old standalone Arbitrage
- * page used) drives both "browse every single-item opportunity right now"
- * (Opportunities tab) and "search for a multi-hop itinerary" (Route Planner
- * tab). The route-only controls (hauler, start/target system, max legs,
- * return-to-start, max results) live in their own small panel since they
- * don't mean anything to the single-item grid.
+ * routes/route_planner.rs) merged with the full-market arbitrage scanner.
+ * Two tabs: "Route Planner" searches for a multi-hop itinerary and shows
+ * the ship/route controls on the left; "Opportunities" browses every
+ * single-item flip right now and shows the item/price/security filters on
+ * the left instead. Both tabs share one `filters` state, so the filters
+ * set on the Opportunities tab still scope a route search.
  */
 export function RoutePlannerPage() {
-  const { haulers } = useHaulers();
   const { systems } = useSystems();
   const { categories } = useCategories();
 
   const [filters, setFilters] = useState<ArbitrageFilters>(defaultArbitrageFilters);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<ArbitrageOpportunity | null>(null);
-  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
   const [tab, setTab] = useState<ViewTab>('route');
   const { opportunities, loading: opportunitiesLoading, error: opportunitiesError } = useArbitrage(filters, page);
 
   const [params, setParams] = useState<RoutePlannerParams>(defaultRoutePlannerParams);
   const { plans, loading, error, plan } = useRoutePlanner();
-  const { createRun } = useRuns(params.haulerId);
+  // `mapFocus` is the route pair the map is (or was last) showing;
+  // `mapOpen` toggles the overlay. Closing keeps `mapFocus` so the
+  // floating "Show route map" button can reopen it unchanged.
   const [mapFocus, setMapFocus] = useState<MapFocus | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
+  // Compact by default so the "Selected system" / route-stop detail that
+  // GalaxyMap renders under the canvas is visible in the overlay without
+  // scrolling; "Expand" gives the canvas the whole viewport.
+  const [mapExpanded, setMapExpanded] = useState(false);
 
-  const selectedHauler = haulers.find((h) => h.hauler_id === params.haulerId) ?? null;
+  function openMap(focus: MapFocus) {
+    setMapFocus(focus);
+    setMapExpanded(false);
+    setMapOpen(true);
+  }
+
+  // Order-book panel: sits alongside the map as a second overlay, opened
+  // by clicking an item name anywhere on this page. `bookTypeId` is kept
+  // after close so the floating button can reopen it.
+  const [bookTypeId, setBookTypeId] = useState<number | null>(null);
+  const [bookOpen, setBookOpen] = useState(false);
+
+  function openBook(typeId: number) {
+    setBookTypeId(typeId);
+    setBookOpen(true);
+  }
+
+  useEffect(() => {
+    if (!mapOpen && !bookOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      setMapOpen(false);
+      setBookOpen(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mapOpen, bookOpen]);
+
   const canPlan =
-    params.startSystemId !== null && (selectedHauler !== null || (params.cargoCapacityM3 !== null && params.iskAvailable !== null));
+    params.startSystemId !== null && params.cargoCapacityM3 !== null && params.iskAvailable !== null;
 
-  function selectHauler(id: number | null) {
-    const hauler = id !== null ? haulers.find((h) => h.hauler_id === id) : undefined;
-    setParams({
-      ...params,
-      haulerId: id,
-      startSystemId: hauler?.home_system_id ?? params.startSystemId,
-    });
-    setFilters({
-      ...filters,
-      securityProfile: hauler?.route_security_profile ?? filters.securityProfile,
-      fromSystemId: hauler?.home_system_id ?? filters.fromSystemId,
-      cargoCapacityM3: hauler?.cargo_capacity_m3 ?? filters.cargoCapacityM3,
-      maxTotalCost: hauler?.isk_available ?? filters.maxTotalCost,
-    });
+  // Cargo capacity is fixed by the ship for now (no free-text hold size);
+  // ISK budget is picked separately from ISK_BUDGET_OPTIONS.
+  function applyPreset(label: string) {
+    const preset = SHIP_PRESETS.find((p) => p.label === label) ?? null;
+    setParams({ ...params, cargoCapacityM3: preset?.cargoM3 ?? null });
+    setFilters({ ...filters, cargoCapacityM3: preset?.cargoM3 ?? null });
   }
 
   function updateFilters(next: ArbitrageFilters) {
@@ -111,14 +202,15 @@ export function RoutePlannerPage() {
 
   function selectRow(o: ArbitrageOpportunity) {
     setSelected(o);
-    setMapFocus({ sourceSystemId: o.buy_system_id, targetSystemId: o.sell_system_id });
+    openMap({ sourceSystemId: o.buy_system_id, targetSystemId: o.sell_system_id });
   }
 
-  const effectiveMaxLegs = params.maxLegs ?? 3;
+  const effectiveMaxLegs = params.maxLegs ?? MAX_LEGS_CAP;
   const canReturnToStart = effectiveMaxLegs >= 2 && params.targetSystemId === null;
 
   function setMaxLegs(value: number | null) {
-    setParams({ ...params, maxLegs: value, returnToStart: params.returnToStart && (value ?? 3) >= 2 });
+    const next = value === null ? null : clampCap(value, MAX_LEGS_CAP);
+    setParams({ ...params, maxLegs: next, returnToStart: params.returnToStart && (next ?? MAX_LEGS_CAP) >= 2 });
   }
 
   // returnToStart and targetSystemId are mutually exclusive server-side --
@@ -136,20 +228,112 @@ export function RoutePlannerPage() {
     plan({ ...params, ...filtersToRouteExtras(filters) });
   }
 
-  async function saveAsRun(routePlan: RoutePlan) {
-    if (params.haulerId === null) throw new Error('select a hauler to save this route as a run');
-    await createRun({
-      legs: routePlan.legs.map((leg) => ({
-        type_id: leg.type_id,
-        buy_system_id: leg.buy_system_id,
-        sell_system_id: leg.sell_system_id,
-        quantity: leg.quantity,
-      })),
-    });
-  }
+  const presetValue = SHIP_PRESETS.find((p) => p.cargoM3 === params.cargoCapacityM3)?.label ?? '';
+
+  const routeControls = (
+    <div className="panel panel--tight" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="field" style={{ margin: 0 }}>
+        <label>Ship</label>
+        <select value={presetValue} onChange={(e) => applyPreset(e.target.value)}>
+          <option value="">— select a ship —</option>
+          {SHIP_PRESETS.map((p) => (
+            <option key={p.label} value={p.label}>
+              {p.label} ({p.cargoM3.toLocaleString()} m³)
+            </option>
+          ))}
+        </select>
+        <p className="field-help" style={{ margin: '6px 0 0' }}>
+          Sets cargo capacity from a rough figure for that ship class -- fixed by the ship for now.
+        </p>
+      </div>
+
+      <div className="field" style={{ margin: 0 }}>
+        <label>Cargo capacity, m³</label>
+        <input type="number" readOnly disabled value={params.cargoCapacityM3 ?? ''} />
+      </div>
+
+      <div className="field" style={{ margin: 0 }}>
+        <label>ISK budget</label>
+        <select
+          value={params.iskAvailable ?? ''}
+          onChange={(e) => setParams({ ...params, iskAvailable: e.target.value === '' ? null : Number(e.target.value) })}
+        >
+          <option value="">— select budget —</option>
+          {ISK_BUDGET_OPTIONS.map((v) => (
+            <option key={v} value={v}>
+              {formatIskBudget(v)}
+            </option>
+          ))}
+        </select>
+        {params.iskAvailable !== null && (
+          <p className="field-help" style={{ margin: '6px 0 0' }}>
+            Planning against <span className="mono">{formatIskBudget(params.iskAvailable)}</span> ISK.
+          </p>
+        )}
+      </div>
+
+      <div className="field" style={{ margin: 0 }}>
+        <label>Starting system</label>
+        <select
+          value={params.startSystemId ?? ''}
+          onChange={(e) => setParams({ ...params, startSystemId: e.target.value === '' ? null : Number(e.target.value) })}
+        >
+          <option value="">— select a trade hub —</option>
+          {TRADE_HUBS.map((h) => (
+            <option key={h.systemId} value={h.systemId}>
+              {h.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <LocationPicker
+        label="Target system (optional)"
+        systems={systems}
+        selectedId={params.targetSystemId}
+        onChange={setTargetSystemId}
+      />
+
+      <div className="field" style={{ margin: 0 }}>
+        <label>Max legs</label>
+        <input
+          type="number"
+          min={1}
+          max={MAX_LEGS_CAP}
+          placeholder={`${MAX_LEGS_CAP} (default)`}
+          value={params.maxLegs ?? ''}
+          onChange={(e) => setMaxLegs(e.target.value === '' ? null : Number(e.target.value))}
+        />
+        <p className="field-help" style={{ margin: '6px 0 0' }}>
+          Maximum is {MAX_LEGS_CAP} for now.
+        </p>
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, textTransform: 'none', letterSpacing: 'normal' }}>
+        <input
+          type="checkbox"
+          style={{ width: 'auto' }}
+          checked={params.returnToStart}
+          disabled={!canReturnToStart}
+          onChange={(e) => setReturnToStart(e.target.checked)}
+        />
+        Return to start (circular route)
+      </label>
+
+      <button className="btn btn--primary btn--full" disabled={!canPlan || loading} onClick={planRoute}>
+        {loading ? 'Planning…' : 'Plan route'}
+      </button>
+      {loading && (
+        <p className="field-help" style={{ margin: 0 }}>
+          Longer searches (more max legs) can take a few seconds -- each additional leg deepens the search by
+          another level.
+        </p>
+      )}
+    </div>
+  );
 
   return (
-    <section className="section" style={{ paddingTop: 140 }}>
+    <section className="section" style={{ paddingTop: 32 }}>
       <div className="section-inner">
         <p className="eyebrow">New Eden // Route Planner</p>
         <AnimatedText
@@ -160,179 +344,48 @@ export function RoutePlannerPage() {
           styleOverrides={{ fontSize: 34, textAlign: 'left', color: '#eef4fa' }}
         />
 
+        <nav style={{ display: 'flex', gap: 8, marginTop: 24 }}>
+          <button className="btn" style={tab === 'route' ? activeTabStyle : undefined} onClick={() => setTab('route')}>
+            Route Planner
+          </button>
+          <button
+            className="btn"
+            style={tab === 'opportunities' ? activeTabStyle : undefined}
+            onClick={() => setTab('opportunities')}
+          >
+            Opportunities
+          </button>
+        </nav>
+
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: filtersCollapsed ? 'auto minmax(0, 1fr)' : 'minmax(0, 0.85fr) minmax(0, 2.15fr)',
+            gridTemplateColumns: 'minmax(0, 0.85fr) minmax(0, 2.15fr)',
             gap: 20,
-            marginTop: 24,
+            marginTop: 16,
             alignItems: 'start',
           }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="panel panel--tight" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div className="field" style={{ margin: 0 }}>
-                <label>Hauler</label>
-                <select
-                  value={params.haulerId ?? ''}
-                  onChange={(e) => selectHauler(e.target.value === '' ? null : Number(e.target.value))}
-                >
-                  <option value="">— enter cargo/ISK manually —</option>
-                  {haulers.map((h) => (
-                    <option key={h.hauler_id} value={h.hauler_id}>
-                      {h.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="field-help" style={{ margin: '6px 0 0' }}>
-                  Pick a hauler to plan against their saved cargo/ISK/route spec, and to be able to save a result as a
-                  run. Also fills in the shared filters below (cargo capacity, buy-out budget, security preference,
-                  home system). Manual entry can preview routes but can't be saved.
-                </p>
-              </div>
-
-              {selectedHauler === null && (
-                <>
-                  <div className="field" style={{ margin: 0 }}>
-                    <label>Cargo capacity, m³</label>
-                    <input
-                      type="number"
-                      value={params.cargoCapacityM3 ?? ''}
-                      onChange={(e) => setParams({ ...params, cargoCapacityM3: e.target.value === '' ? null : Number(e.target.value) })}
-                    />
-                  </div>
-                  <div className="field" style={{ margin: 0 }}>
-                    <label>ISK available</label>
-                    <input
-                      type="number"
-                      value={params.iskAvailable ?? ''}
-                      onChange={(e) => setParams({ ...params, iskAvailable: e.target.value === '' ? null : Number(e.target.value) })}
-                    />
-                  </div>
-                </>
-              )}
-
-              <LocationPicker
-                label="Starting system"
-                systems={systems}
-                selectedId={params.startSystemId}
-                onChange={(id) => setParams({ ...params, startSystemId: id })}
-              />
-              <p className="field-help" style={{ margin: '-8px 0 0' }}>
-                Required -- prefilled from the selected hauler's home system, if it has one, but still editable, and
-                needed for manual entry too. Keeps the first hop's search constrained to somewhere specific instead of
-                scanning the whole market, which is what actually makes this fast.
-              </p>
-
-              <LocationPicker
-                label="Target system (optional)"
-                systems={systems}
-                selectedId={params.targetSystemId}
-                onChange={setTargetSystemId}
-              />
-              <p className="field-help" style={{ margin: '-8px 0 0' }}>
-                Confines every hop's sell side to the shortest path between the two systems, so results are things
-                worth carrying along the way from A to B -- not just from A. Leave unset to search freely instead.
-                Mutually exclusive with "Return to start" below.
-              </p>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label>Max legs</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={6}
-                  placeholder="3 (default)"
-                  value={params.maxLegs ?? ''}
-                  onChange={(e) => setMaxLegs(e.target.value === '' ? null : Number(e.target.value))}
-                />
-              </div>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, textTransform: 'none', letterSpacing: 'normal' }}>
-                <input
-                  type="checkbox"
-                  style={{ width: 'auto' }}
-                  checked={params.returnToStart}
-                  disabled={!canReturnToStart}
-                  onChange={(e) => setReturnToStart(e.target.checked)}
-                />
-                Return to start (circular route)
-              </label>
-              <p className="field-help" style={{ margin: '-8px 0 0' }}>
-                {params.targetSystemId !== null
-                  ? 'Not available with a target system set -- pick one or the other.'
-                  : canReturnToStart
-                    ? "Forces the last leg to sell back into wherever the route started, instead of ending wherever's most profitable."
-                    : 'Needs at least 2 max legs -- a single leg can never buy and sell in the same system.'}
-              </p>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label>Max results</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={5}
-                  placeholder="3 (default)"
-                  value={params.maxResults ?? ''}
-                  onChange={(e) => setParams({ ...params, maxResults: e.target.value === '' ? null : Number(e.target.value) })}
-                />
-                <p className="field-help" style={{ margin: '6px 0 0' }}>
-                  How many of the best routes found come back. The search itself isn't limited by this -- it explores
-                  every option worth considering regardless -- this just caps how many you see.
-                </p>
-              </div>
-
-              <p className="field-help" style={{ margin: 0 }}>
-                Item name/category, price/profit/volume ranges, buy-out budget, excluded systems, buy/sell security,
-                sales tax %, and route security preference come from the shared filters panel below -- same one the
-                Opportunities tab uses.
-              </p>
-
-              <button className="btn btn--primary btn--full" disabled={!canPlan || loading} onClick={planRoute}>
-                {loading ? 'Planning…' : 'Plan route'}
-              </button>
-              {loading && (
-                <p className="field-help" style={{ margin: 0 }}>
-                  Longer searches (more max legs) can take a few seconds -- each additional leg deepens the search by
-                  another level.
-                </p>
-              )}
-            </div>
-
-            <div>
-              <button
-                className="btn"
-                style={{ marginBottom: 12, fontSize: 11, padding: '6px 10px' }}
-                onClick={() => setFiltersCollapsed((c) => !c)}
-              >
-                {filtersCollapsed ? '▶ Filters' : '◀ Collapse filters'}
-              </button>
-              {!filtersCollapsed && (
-                <ArbitrageFilterPanel
-                  filters={filters}
-                  onChange={updateFilters}
-                  categories={categories}
-                  systems={systems}
-                  haulers={haulers}
-                  showHaulerPicker={false}
-                />
-              )}
-            </div>
+          <div>
+            {tab === 'route' ? (
+              routeControls
+            ) : (
+              <ArbitrageFilterPanel filters={filters} onChange={updateFilters} categories={categories} systems={systems} />
+            )}
           </div>
 
           <div>
-            <nav style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <button
-                className="btn"
-                style={tab === 'opportunities' ? activeTabStyle : undefined}
-                onClick={() => setTab('opportunities')}
-              >
-                Opportunities
-              </button>
-              <button className="btn" style={tab === 'route' ? activeTabStyle : undefined} onClick={() => setTab('route')}>
-                Route Planner
-              </button>
-            </nav>
+            {tab === 'route' && (
+              <>
+                {error && <p className="error-text">{error}</p>}
+                {!loading && plans.length === 0 && !error && (
+                  <p className="text-muted mono">Set your constraints and hit "Plan route" to search for hauling itineraries.</p>
+                )}
+                {plans.map((p, i) => (
+                  <RoutePlanCard key={i} plan={p} index={i} onViewOnMap={openMap} onOpenBook={openBook} />
+                ))}
+              </>
+            )}
 
             {tab === 'opportunities' && (
               <>
@@ -346,54 +399,93 @@ export function RoutePlannerPage() {
                   onPageChange={setPage}
                   selectedTypeId={selected?.type_id ?? null}
                   onSelectRow={selectRow}
+                  onOpenBook={openBook}
                 />
                 {selected && (
                   <div className="panel panel--tight" style={{ marginTop: 12 }}>
                     <div className="panel-header">
                       <h3 className="panel-title">{selected.type_name}</h3>
+                      <button className="btn" style={{ fontSize: 11, padding: '6px 10px' }} onClick={() => openBook(selected.type_id)}>
+                        Order book
+                      </button>
                     </div>
                     <p className="field-help" style={{ margin: 0 }}>
-                      {selected.buy_system_name} → {selected.sell_system_name} -- see the map below.
+                      {selected.buy_system_name} → {selected.sell_system_name}
                     </p>
-                    <SaveOpportunityAsRun opportunity={selected} haulers={haulers} />
                   </div>
                 )}
-              </>
-            )}
-
-            {tab === 'route' && (
-              <>
-                {error && <p className="error-text">{error}</p>}
-                {!loading && plans.length === 0 && !error && (
-                  <p className="text-muted mono">Set your constraints and hit "Plan route" to search for hauling itineraries.</p>
-                )}
-                {plans.map((p, i) => (
-                  <RoutePlanCard
-                    key={i}
-                    plan={p}
-                    index={i}
-                    canSave={params.haulerId !== null}
-                    onSave={() => saveAsRun(p)}
-                    onViewOnMap={setMapFocus}
-                  />
-                ))}
               </>
             )}
           </div>
         </div>
 
-        {mapFocus && (
-          <div className="panel panel--tight" style={{ marginTop: 20 }}>
+      </div>
+
+      {((mapFocus && !mapOpen) || (bookTypeId !== null && !bookOpen)) && (
+        <div style={{ position: 'fixed', right: 20, bottom: 20, zIndex: 150, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {bookTypeId !== null && !bookOpen && (
+            <button className="btn btn--primary" onClick={() => setBookOpen(true)}>
+              📖 Show order book
+            </button>
+          )}
+          {mapFocus && !mapOpen && (
+            <button className="btn btn--primary" onClick={() => setMapOpen(true)}>
+              ◹ Show route map
+            </button>
+          )}
+        </div>
+      )}
+
+      {bookOpen && bookTypeId !== null && <RouteItemBook typeId={bookTypeId} onClose={() => setBookOpen(false)} />}
+
+      {mapFocus && mapOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setMapOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 200,
+            background: 'rgba(2, 4, 10, 0.72)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            className="panel panel--tight"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(1200px, 94vw)',
+              height: 'min(860px, 90vh)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
             <div className="panel-header">
               <h3 className="panel-title">Route on map</h3>
-              <button className="btn" onClick={() => setMapFocus(null)}>
-                Hide map
+              <button className="btn" onClick={() => setMapOpen(false)}>
+                Close ✕
               </button>
             </div>
-            <GalaxyMap focusRoute={mapFocus} />
+            <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+              <GalaxyMap
+                focusRoute={mapFocus}
+                canvasHeight={mapExpanded ? '76vh' : 340}
+                canvasActions={
+                  <button className="btn" onClick={() => setMapExpanded((v) => !v)}>
+                    {mapExpanded ? '▣ Collapse' : '⤢ Expand'}
+                  </button>
+                }
+              />
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -3,11 +3,11 @@ import { catalogPost } from './client';
 import type { LegPriceCheck, PriceCheckLegRequest } from './types';
 
 /** On-demand re-quote of a set of legs against the live market -- not
- * auto-refreshing (unlike usePriceWatches' 30s poll), since this is meant
- * for a run/route plan a trader might pull up 30+ minutes after building
- * it and needs an explicit "is this still good?" check on, not a live
- * feed. Results come back in the same order `legs` was passed in, so the
- * caller zips them onto its own leg list by index. */
+ * auto-refreshing, since this is meant for a route plan a trader might
+ * pull up 30+ minutes after building it and needs an explicit "is this
+ * still good?" check on, not a live feed. Results come back in the same
+ * order `legs` was passed in, so the caller zips them onto its own leg
+ * list by index. */
 export function usePriceCheck(): {
   checks: LegPriceCheck[] | null;
   loading: boolean;

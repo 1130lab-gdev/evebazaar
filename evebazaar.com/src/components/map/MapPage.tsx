@@ -9,7 +9,7 @@ import { GalaxyMap } from './GalaxyMap';
  */
 export function MapPage() {
   return (
-    <section className="section" style={{ paddingTop: 140 }}>
+    <section className="section" style={{ paddingTop: 32 }}>
       <div className="section-inner">
         <p className="eyebrow">New Eden // Galaxy Map</p>
         <GalaxyMap />

@@ -160,6 +160,11 @@ pub struct ArbitrageFilter {
     /// request doesn't specify one, rather than defaulting to 0% and
     /// silently overstating every profit figure in the app.
     pub sales_tax_pct: f64,
+    /// Drop items that are illegal to haul in most of empire space --
+    /// matched by group name (`Booster`-family groups and `Slaves`), the
+    /// only stored signal, since there's no per-type contraband flag in
+    /// this schema. A coarse cut, not a per-empire contraband list.
+    pub exclude_illegal: bool,
 }
 
 /// Finds, for each tradeable item, the single best cross-system buy-low
@@ -324,6 +329,7 @@ pub async fn find_opportunities(pool: &Pool, filter: &ArbitrageFilter) -> Result
            AND ($16::bigint IS NULL OR LEAST(sv.volume_available, bv.volume_available) >= $16)
            AND ($17::float8 IS NULL OR bs.price * sv.volume_available <= $17)
            AND ($21::int IS NULL OR ld.distance <= $21)
+           AND ($24::bool = false OR NOT (LOWER(g.name) LIKE '%booster%' OR LOWER(g.name) = 'slaves'))
          LIMIT $22";
 
     let rows = txn
@@ -353,6 +359,7 @@ pub async fn find_opportunities(pool: &Pool, filter: &ArbitrageFilter) -> Result
                 &filter.max_jumps_from_location,
                 &CANDIDATE_CAP,
                 &filter.sales_tax_pct,
+                &filter.exclude_illegal,
             ],
         )
         .await?;
@@ -399,23 +406,16 @@ pub async fn find_opportunities(pool: &Pool, filter: &ArbitrageFilter) -> Result
 
 /// Current best price for one item at one specific buy system and one
 /// specific sell system -- a live quote for exactly the pair a caller
-/// already picked, not a search. Two callers need this: saving a run leg
-/// (the server re-prices at save time rather than trusting whatever the
-/// client sends, so a saved run reflects a real quote, not a fabricated
-/// one) and the route planner (which already knows which item/systems it
-/// wants priced at each step and just needs the numbers, not another
-/// market-wide search).
+/// already picked, not a search. The route planner uses this: it already
+/// knows which item/systems it wants priced at each step and just needs
+/// the numbers, not another market-wide search.
 pub struct LegQuote {
-    pub type_name: String,
-    pub buy_system_name: String,
-    pub sell_system_name: String,
     pub buy_price: f64,
     pub sell_price: f64,
     pub net_sell_price: f64,
     /// `min(buy-side, sell-side)` available at the best price on each
     /// side, same meaning as `ArbitrageOpportunity::volume_available`.
     pub available_volume: i64,
-    pub packaged_volume: Option<f64>,
 }
 
 pub async fn quote_leg(
@@ -446,8 +446,7 @@ pub async fn quote_leg(
                  FROM market_orders mo, sell_side
                  WHERE mo.type_id = $1 AND mo.system_id = $3 AND mo.is_buy_order = true AND mo.price = sell_side.price
              )
-             SELECT t.name, ssb.name, sss.name, buy_side.price, sell_side.price, buy_volume.volume, sell_volume.volume,
-                    t.packaged_volume
+             SELECT buy_side.price, sell_side.price, buy_volume.volume, sell_volume.volume
              FROM types t
              JOIN solar_systems ssb ON ssb.system_id = $2
              JOIN solar_systems sss ON sss.system_id = $3
@@ -461,23 +460,18 @@ pub async fn quote_leg(
         .await?;
 
     let Some(row) = row else { return Ok(None) };
-    let buy_price: Option<f64> = row.get(3);
-    let sell_price: Option<f64> = row.get(4);
+    let buy_price: Option<f64> = row.get(0);
+    let sell_price: Option<f64> = row.get(1);
     let (Some(buy_price), Some(sell_price)) = (buy_price, sell_price) else {
         return Ok(None); // no live order on one side or the other right now
     };
-    let buy_volume: i64 = row.get(5);
-    let sell_volume: i64 = row.get(6);
-    let packaged_volume: Option<f64> = row.get(7);
+    let buy_volume: i64 = row.get(2);
+    let sell_volume: i64 = row.get(3);
 
     Ok(Some(LegQuote {
-        type_name: row.get(0),
-        buy_system_name: row.get(1),
-        sell_system_name: row.get(2),
         buy_price,
         sell_price,
         net_sell_price: sell_price * (1.0 - sales_tax_pct / 100.0),
         available_volume: buy_volume.min(sell_volume),
-        packaged_volume,
     }))
 }

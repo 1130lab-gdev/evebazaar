@@ -27,6 +27,7 @@ export const defaultArbitrageFilters: ArbitrageFilters = {
   securityProfile: '',
   salesTaxPct: 7.5,
   requireBidExceedsOffer: true,
+  excludeIllegal: false,
   sortBy: 'profit',
   sortDesc: true,
 };
@@ -55,6 +56,7 @@ function buildQuery(filters: ArbitrageFilters, page: number): string {
   if (filters.securityProfile) params.set('security_profile', filters.securityProfile);
   params.set('sales_tax_pct', String(filters.salesTaxPct));
   params.set('require_bid_exceeds_offer', String(filters.requireBidExceedsOffer));
+  if (filters.excludeIllegal) params.set('exclude_illegal', 'true');
   params.set('sort_by', filters.sortBy);
   params.set('sort_desc', String(filters.sortDesc));
   params.set('limit', String(ARBITRAGE_PAGE_SIZE));
@@ -70,7 +72,7 @@ export function useArbitrage(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Same reasoning as useMarketOrders: react to the built query string, not
+  // Same reasoning as useOrderBook: react to the built query string, not
   // the filters object by reference, so an unrelated re-render doesn't
   // trigger a refetch.
   const query = buildQuery(filters, page);

@@ -3,13 +3,11 @@ import { catalogRequest } from './client';
 import type { RoutePlan, RoutePlannerParams } from './types';
 
 export const defaultRoutePlannerParams: RoutePlannerParams = {
-  haulerId: null,
   cargoCapacityM3: null,
   iskAvailable: null,
   startSystemId: null,
   targetSystemId: null,
   maxLegs: null,
-  maxResults: null,
   securityProfile: '',
   salesTaxPct: null,
   returnToStart: false,
@@ -27,17 +25,16 @@ export const defaultRoutePlannerParams: RoutePlannerParams = {
   excludeSystemIds: [],
   buySecurityClasses: [],
   sellSecurityClasses: [],
+  excludeIllegal: false,
 };
 
 function buildQuery(params: RoutePlannerParams): string {
   const q = new URLSearchParams();
-  if (params.haulerId !== null) q.set('hauler_id', String(params.haulerId));
   if (params.cargoCapacityM3 !== null) q.set('cargo_capacity_m3', String(params.cargoCapacityM3));
   if (params.iskAvailable !== null) q.set('isk_available', String(params.iskAvailable));
   if (params.startSystemId !== null) q.set('start_system_id', String(params.startSystemId));
   if (params.targetSystemId !== null) q.set('target_system_id', String(params.targetSystemId));
   if (params.maxLegs !== null) q.set('max_legs', String(params.maxLegs));
-  if (params.maxResults !== null) q.set('max_results', String(params.maxResults));
   if (params.securityProfile) q.set('security_profile', params.securityProfile);
   if (params.salesTaxPct !== null) q.set('sales_tax_pct', String(params.salesTaxPct));
   if (params.returnToStart) q.set('return_to_start', 'true');
@@ -55,11 +52,12 @@ function buildQuery(params: RoutePlannerParams): string {
   for (const id of params.excludeSystemIds) q.append('exclude_system_id', String(id));
   for (const cls of params.buySecurityClasses) q.append('buy_security_class', cls);
   for (const cls of params.sellSecurityClasses) q.append('sell_security_class', cls);
+  if (params.excludeIllegal) q.set('exclude_illegal', 'true');
   return q.toString();
 }
 
 /**
- * Unlike useArbitrage/useMarketOrders, this does NOT auto-refetch as params
+ * Unlike useArbitrage/useOrderBook, this does NOT auto-refetch as params
  * change -- a plan is a branch-and-bound search over the market (see
  * catalog-api's routes/route_planner.rs) that can still run to a handful of
  * seconds at the clamped worst case (6 legs), so it's a deliberate `plan()`

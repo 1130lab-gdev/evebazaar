@@ -39,6 +39,7 @@ export function ArbitrageGrid({
   onPageChange,
   selectedTypeId,
   onSelectRow,
+  onOpenBook,
 }: {
   opportunities: ArbitrageOpportunity[];
   loading: boolean;
@@ -49,6 +50,8 @@ export function ArbitrageGrid({
   onPageChange: (page: number) => void;
   selectedTypeId: number | null;
   onSelectRow: (opportunity: ArbitrageOpportunity) => void;
+  /** Open the in-page order-book panel for this item. */
+  onOpenBook: (typeId: number) => void;
 }) {
   const showTripProfit = filters.cargoCapacityM3 !== null;
   const showDistance = filters.fromSystemId !== null;
@@ -108,7 +111,25 @@ export function ArbitrageGrid({
                 }}
               >
                 <td>
-                  {o.type_name}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenBook(o.type_id);
+                    }}
+                    title="Show order book"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      font: 'inherit',
+                      color: 'var(--accent-cyan)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    {o.type_name}
+                  </button>
                   <ItemInfoIcon typeId={o.type_id} typeName={o.type_name} />
                   <div className="text-muted mono" style={{ fontSize: 10 }}>
                     {o.category_name}

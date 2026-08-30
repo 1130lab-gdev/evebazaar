@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useRegions } from '../../api/map/useRegions';
 import { useSystems } from '../../api/map/useSystems';
 import { useStargates } from '../../api/map/useStargates';
@@ -58,9 +59,24 @@ export interface GalaxyMapProps {
   onSelectedSystemChange?: (system: SystemSummary | null) => void;
   onRouteChange?: (route: RouteResponse | null) => void;
   focusRoute?: { sourceSystemId: number; targetSystemId: number } | null;
+  /** Target height of the 3D canvas. A host embedding this in a tighter
+   * space (e.g. a modal that also has to show the detail panels below the
+   * canvas) can shrink it; defaults to the standalone page's tall canvas.
+   * Still capped by `.map-canvas-wrap`'s `max-height` in CSS. */
+  canvasHeight?: number | string;
+  /** Extra control(s) rendered in the canvas's top-right overlay cluster,
+   * left of the built-in "Reset view" button -- e.g. a host's
+   * expand/collapse toggle. */
+  canvasActions?: ReactNode;
 }
 
-export function GalaxyMap({ onSelectedSystemChange, onRouteChange, focusRoute }: GalaxyMapProps = {}) {
+export function GalaxyMap({
+  onSelectedSystemChange,
+  onRouteChange,
+  focusRoute,
+  canvasHeight = 900,
+  canvasActions,
+}: GalaxyMapProps = {}) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
@@ -68,6 +84,10 @@ export function GalaxyMap({ onSelectedSystemChange, onRouteChange, focusRoute }:
   const [routeTargetId, setRouteTargetId] = useState<number | null>(null);
   const [resetSignal, setResetSignal] = useState(0);
   const [routeProfile, setRouteProfile] = useState<RouteProfile | ''>('');
+  // Warp speed / per-band weights / avoid list are collapsed by default so
+  // the jump list isn't pushed down; profile stays visible as the one
+  // knob most routes actually touch.
+  const [routeSettingsOpen, setRouteSettingsOpen] = useState(false);
   const [warpSpeed, setWarpSpeed] = useState('');
   const [highsecMult, setHighsecMult] = useState('');
   const [lowsecMult, setLowsecMult] = useState('');
@@ -224,7 +244,7 @@ export function GalaxyMap({ onSelectedSystemChange, onRouteChange, focusRoute }:
         {loading ? (
           <p className="text-muted mono">loading the galaxy…</p>
         ) : (
-          <div className="map-canvas-wrap" style={{ height: 900 }}>
+          <div className="map-canvas-wrap" style={{ height: canvasHeight }}>
             <GalaxyScene3D
               systems={kspaceSystems}
               positions={positions}
@@ -237,18 +257,20 @@ export function GalaxyMap({ onSelectedSystemChange, onRouteChange, focusRoute }:
               onSelect={setSelectedId}
               resetSignal={resetSignal}
             />
-            <button className="btn map-reset-btn" onClick={() => setResetSignal((n) => n + 1)}>
-              Reset view
-            </button>
+            <div className="map-canvas-actions">
+              {canvasActions}
+              <button className="btn" onClick={() => setResetSignal((n) => n + 1)}>
+                Reset view
+              </button>
+            </div>
+            <div className="map-canvas-legend">
+              <SecurityLegend />
+            </div>
           </div>
         )}
       </div>
 
       <div className="map-layout">
-        <div className="panel panel--tight map-controls">
-          <SecurityLegend />
-        </div>
-
         <div className="panel panel--tight map-detail">
           <div className="panel-header">
             <h2 className="panel-title">Selected system</h2>
@@ -319,8 +341,10 @@ export function GalaxyMap({ onSelectedSystemChange, onRouteChange, focusRoute }:
               </div>
             </div>
           )}
+        </div>
 
-          <div className="panel-header map-detail-section">
+        <div className="panel panel--tight map-detail">
+          <div className="panel-header">
             <h2 className="panel-title">Route</h2>
           </div>
           <div className="field">
@@ -335,53 +359,66 @@ export function GalaxyMap({ onSelectedSystemChange, onRouteChange, focusRoute }:
               <option value="low_sec_plus">low_sec_plus</option>
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="route-warp">warp_speed_au_s</label>
-            <input
-              id="route-warp"
-              type="number"
-              step="any"
-              value={warpSpeed}
-              onChange={(e) => setWarpSpeed(e.target.value)}
-              placeholder="default 3.0"
-            />
-          </div>
-          <div className="route-mult-grid">
-            <div className="field">
-              <label htmlFor="route-mult-high">high sec</label>
-              <input
-                id="route-mult-high"
-                type="number"
-                step="any"
-                value={highsecMult}
-                onChange={(e) => setHighsecMult(e.target.value)}
-                placeholder="1.0"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="route-mult-low">low sec</label>
-              <input
-                id="route-mult-low"
-                type="number"
-                step="any"
-                value={lowsecMult}
-                onChange={(e) => setLowsecMult(e.target.value)}
-                placeholder="1.0"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="route-mult-null">null sec</label>
-              <input
-                id="route-mult-null"
-                type="number"
-                step="any"
-                value={nullsecMult}
-                onChange={(e) => setNullsecMult(e.target.value)}
-                placeholder="1.0"
-              />
-            </div>
-          </div>
-          <AvoidSystemsPicker systems={kspaceSystems} systemName={systemName} avoidIds={avoidIds} onChange={setAvoidIds} />
+          <button
+            type="button"
+            className="btn"
+            style={{ fontSize: 11, padding: '6px 10px', alignSelf: 'flex-start' }}
+            onClick={() => setRouteSettingsOpen((v) => !v)}
+          >
+            {routeSettingsOpen ? '▾' : '▸'} Route settings
+            {!routeSettingsOpen && (avoidIds.length > 0 || warpSpeed || highsecMult || lowsecMult || nullsecMult) ? ' •' : ''}
+          </button>
+          {routeSettingsOpen && (
+            <>
+              <div className="field">
+                <label htmlFor="route-warp">warp_speed_au_s</label>
+                <input
+                  id="route-warp"
+                  type="number"
+                  step="any"
+                  value={warpSpeed}
+                  onChange={(e) => setWarpSpeed(e.target.value)}
+                  placeholder="default 3.0"
+                />
+              </div>
+              <div className="route-mult-grid">
+                <div className="field">
+                  <label htmlFor="route-mult-high">high sec</label>
+                  <input
+                    id="route-mult-high"
+                    type="number"
+                    step="any"
+                    value={highsecMult}
+                    onChange={(e) => setHighsecMult(e.target.value)}
+                    placeholder="1.0"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="route-mult-low">low sec</label>
+                  <input
+                    id="route-mult-low"
+                    type="number"
+                    step="any"
+                    value={lowsecMult}
+                    onChange={(e) => setLowsecMult(e.target.value)}
+                    placeholder="1.0"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="route-mult-null">null sec</label>
+                  <input
+                    id="route-mult-null"
+                    type="number"
+                    step="any"
+                    value={nullsecMult}
+                    onChange={(e) => setNullsecMult(e.target.value)}
+                    placeholder="1.0"
+                  />
+                </div>
+              </div>
+              <AvoidSystemsPicker systems={kspaceSystems} systemName={systemName} avoidIds={avoidIds} onChange={setAvoidIds} />
+            </>
+          )}
           {!routeParams && (
             <p className="text-muted mono">Pick a source and target to highlight the path between them.</p>
           )}

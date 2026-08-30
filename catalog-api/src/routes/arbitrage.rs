@@ -68,6 +68,10 @@ pub struct ArbitrageParams {
     /// -- silently defaulting to 0 would overstate real, take-home profit
     /// on every row.
     pub sales_tax_pct: Option<f64>,
+    /// When true, drop items that are illegal to haul in most of empire
+    /// space (boosters and slaves, matched by group name -- the only
+    /// stored signal). Defaults to false.
+    pub exclude_illegal: Option<bool>,
     /// One of `profit`, `profit_pct`, `volume`, `buy_price`, `sell_price`,
     /// `name`, `size`, `buy_system`, `sell_system`, `jumps`, `isk_per_jump`,
     /// `trip_profit`, `distance_from_location`. Defaults to `profit`.
@@ -191,6 +195,7 @@ pub async fn list_opportunities(
         max_jumps_from_location,
         require_bid_exceeds_offer: params.require_bid_exceeds_offer.unwrap_or(true),
         sales_tax_pct: params.sales_tax_pct.unwrap_or(DEFAULT_SALES_TAX_PCT),
+        exclude_illegal: params.exclude_illegal.unwrap_or(false),
     };
     let mut opportunities = db::arbitrage::find_opportunities(&state.db, &filter).await?;
     fill_jumps(&mut opportunities, graph, multipliers);

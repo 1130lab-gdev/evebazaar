@@ -62,7 +62,6 @@ export interface MarketOrder {
 
 export interface OrderFilters {
   regionIds: number[];
-  side: 'buy' | 'sell' | null;
   minPrice: number | null;
   maxPrice: number | null;
   minQty: number | null;
@@ -180,89 +179,10 @@ export interface ArbitrageFilters {
    * actual (skill/standing-reduced) rate and enters it. */
   salesTaxPct: number;
   requireBidExceedsOffer: boolean;
+  /** Drop items illegal to haul in most of empire space (boosters, slaves). */
+  excludeIllegal: boolean;
   sortBy: ArbitrageSortField;
   sortDesc: boolean;
-}
-
-/** A saved trader profile -- cargo hold size and ISK on hand, fed into the
- * arbitrage scanner's cargo/budget fields and the route planner without
- * re-entering them every time. */
-export interface Hauler {
-  hauler_id: number;
-  name: string;
-  cargo_capacity_m3: number;
-  isk_available: number;
-  /** Saved route preference, fed as the route planner's (and, when this
-   * hauler is selected, the arbitrage scanner's) securityProfile default.
-   * `null` means fewest jumps. */
-  route_security_profile: ArbitrageSecurityProfile | null;
-  /** Default startSystemId (route planner) / fromSystemId (arbitrage
-   * scanner) for this hauler, e.g. "I keep this hauler in Jita". `null`
-   * means no default. */
-  home_system_id: number | null;
-  /** The owning freighter (exchange-webapi user id). `null` for haulers created before ownership existed. */
-  owner_user_id: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export type RunStatus = 'planned' | 'in_progress' | 'completed' | 'abandoned';
-
-/** One buy-here-sell-there leg of a run, in travel order. Every field is a
- * snapshot of prices/names taken when the run was saved -- not re-derived
- * from live data on read, so a run keeps showing what it looked like when
- * planned even after market prices move. */
-export interface HaulerRunLeg {
-  run_leg_id: number;
-  leg_order: number;
-  type_id: number;
-  type_name: string;
-  buy_system_id: number;
-  buy_system_name: string;
-  sell_system_id: number;
-  sell_system_name: string;
-  buy_price: number;
-  sell_price: number;
-  quantity: number;
-  expected_profit: number;
-  completed: boolean;
-}
-
-/** A route + trade plan pinned to a `Hauler`. */
-export interface HaulerRun {
-  run_id: number;
-  hauler_id: number;
-  name: string | null;
-  status: RunStatus;
-  created_at: string;
-  updated_at: string;
-  legs: HaulerRunLeg[];
-}
-
-export interface HaulerRequest {
-  name: string;
-  cargo_capacity_m3: number;
-  isk_available: number;
-  route_security_profile: ArbitrageSecurityProfile | null;
-  home_system_id: number | null;
-}
-
-export interface CreateRunLegRequest {
-  type_id: number;
-  buy_system_id: number;
-  sell_system_id: number;
-  /** Units to buy at this leg. Omit to auto-size against the hauler's full
-   * stated cargo/ISK (see catalog-api's routes/haulers.rs for the exact
-   * independent-per-leg sizing rule) -- a route-planner-built route should
-   * always pass this explicitly instead, since the planner already
-   * accounted for a depleting budget across legs. */
-  quantity?: number;
-}
-
-export interface CreateRunRequest {
-  name?: string;
-  legs: CreateRunLegRequest[];
-  sales_tax_pct?: number;
 }
 
 /** One leg of a candidate multi-hop itinerary the route planner built --
@@ -299,15 +219,11 @@ export interface RoutePlan {
 }
 
 export interface RoutePlannerParams {
-  /** Loads cargo_capacity_m3/isk_available from a saved hauler. Mutually
-   * exclusive with cargoCapacityM3/iskAvailable -- if both are given, the
-   * hauler wins. */
-  haulerId: number | null;
   cargoCapacityM3: number | null;
   iskAvailable: number | null;
-  /** Where the first leg must buy from -- required (falls back to the
-   * selected hauler's home system server-side, if it has one, but manual
-   * entry needs it set directly). */
+  /** Where the first leg must buy from -- required, keeps the first hop's
+   * search constrained to somewhere specific instead of scanning the whole
+   * market. */
   startSystemId: number | null;
   /** Where the route should end up, optional. When set, every hop's sell
    * side is confined to the shortest stargate path from startSystemId to
@@ -316,14 +232,8 @@ export interface RoutePlannerParams {
    * done; it isn't forced onto some particular leg. Mutually exclusive
    * with returnToStart. */
   targetSystemId: number | null;
-  /** Number of buy-sell hops. Defaults to 3 server-side, clamped to 6. */
+  /** Number of buy-sell hops. Defaults to 3 server-side, clamped to 3. */
   maxLegs: number | null;
-  /** How many of the best routes found to return. Defaults to 3
-   * server-side, clamped to 5 -- purely a result-count/pruning-threshold
-   * knob, not a search-width limit: the server's branch-and-bound search
-   * explores every branch its profit bound doesn't rule out, not just
-   * this many. */
-  maxResults: number | null;
   /** Unlike the arbitrage scanner's identically-named field (which only
    * biases reported jump counts), this is a hard constraint here:
    * high_sec_only never buys or sells anywhere below 0.5 security,
@@ -361,38 +271,8 @@ export interface RoutePlannerParams {
    * implies, not a replacement for it. */
   buySecurityClasses: SecurityClass[];
   sellSecurityClasses: SecurityClass[];
-}
-
-/** A standing alert: "tell me when this item is worth more than I think it
- * is right now." `reference_price` is usually what was paid for stock
- * already on hand, though nothing enforces that. Triggers once the best
- * live buy order anywhere clears `reference_price * (1 + threshold_pct /
- * 100)` -- the buy side, since "what would someone pay me for this" is
- * what matters when deciding whether to sell something already owned. */
-export interface PriceWatch {
-  watch_id: number;
-  type_id: number;
-  type_name: string;
-  reference_price: number;
-  threshold_pct: number;
-  /** Highest live buy order for this type, anywhere in the market. `null`
-   * if nobody's currently buying it at all. */
-  current_price: number | null;
-  /** `current_price >= reference_price * (1 + threshold_pct / 100)`. */
-  triggered: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PriceWatchRequest {
-  type_id: number;
-  reference_price: number;
-  threshold_pct: number;
-}
-
-export interface UpdatePriceWatchRequest {
-  reference_price: number;
-  threshold_pct: number;
+  /** Drop items illegal to haul in most of empire space (boosters, slaves). */
+  excludeIllegal: boolean;
 }
 
 /** Answers "is this leg still good?" against the live market, for a leg

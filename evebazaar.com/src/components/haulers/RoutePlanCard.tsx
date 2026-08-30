@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { usePriceCheck } from '../../api/catalog/usePriceCheck';
 import type { RoutePlan, RoutePlanLeg } from '../../api/catalog/types';
 import { formatIsk, formatQty, formatSecStatus } from '../../lib/format';
@@ -27,33 +26,15 @@ function groupIntoHops(legs: RoutePlanLeg[]): { buySystemId: number; sellSystemI
 export function RoutePlanCard({
   plan,
   index,
-  canSave,
-  onSave,
   onViewOnMap,
+  onOpenBook,
 }: {
   plan: RoutePlan;
   index: number;
-  canSave: boolean;
-  onSave: () => Promise<void>;
   onViewOnMap: (focus: { sourceSystemId: number; targetSystemId: number }) => void;
+  /** Open the in-page order-book panel for this item. */
+  onOpenBook: (typeId: number) => void;
 }) {
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    try {
-      await onSave();
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save run.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const hops = groupIntoHops(plan.legs);
   const avgHopProfit = hops.length > 0 ? plan.total_profit / hops.length : 0;
   const iskPerJump = plan.total_jumps && plan.total_jumps > 0 ? plan.total_profit / plan.total_jumps : null;
@@ -87,12 +68,8 @@ export function RoutePlanCard({
         </h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {checkError && <span className="error-text">{checkError}</span>}
-          {error && <span className="error-text">{error}</span>}
           <button className="btn" style={{ padding: '6px 10px', fontSize: 11 }} disabled={checking} onClick={refreshPrices}>
             {checking ? 'Checking…' : checks ? 'Recheck prices' : 'Check prices'}
-          </button>
-          <button className="btn btn--primary" style={{ padding: '6px 12px', fontSize: 11 }} disabled={!canSave || saving || saved} onClick={handleSave}>
-            {saved ? 'Saved ✓' : saving ? 'Saving…' : 'Save as run'}
           </button>
         </div>
       </div>
@@ -132,7 +109,22 @@ export function RoutePlanCard({
                     </td>
                   )}
                   <td>
-                    {leg.type_name}
+                    <button
+                      type="button"
+                      onClick={() => onOpenBook(leg.type_id)}
+                      title="Show order book"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        font: 'inherit',
+                        color: 'var(--accent-cyan)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      {leg.type_name}
+                    </button>
                     <ItemInfoIcon typeId={leg.type_id} typeName={leg.type_name} />
                   </td>
                   {itemIndex === 0 && (

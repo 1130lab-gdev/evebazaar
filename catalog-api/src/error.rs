@@ -9,10 +9,6 @@ use serde_json::json;
 pub enum AppError {
     #[error("not found")]
     NotFound,
-    #[error("invalid API key")]
-    Unauthorized,
-    #[error("not permitted")]
-    Forbidden,
     #[error("{0}")]
     BadRequest(String),
     #[error(transparent)]
@@ -29,8 +25,6 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
             AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, self.to_string()),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             AppError::Pool(e) => {
                 tracing::error!(error = %e, "db pool error");

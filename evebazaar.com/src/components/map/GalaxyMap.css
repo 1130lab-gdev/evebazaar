@@ -18,11 +18,11 @@
   position: relative;
 }
 
-/* The row below the canvas: security legend (narrow) + selected
-   system/route detail (wide). */
+/* The row below the canvas: selected-system detail + route/jumps, side by
+   side (the security legend now lives overlaid on the canvas itself). */
 .map-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   align-items: start;
 }
@@ -31,11 +31,6 @@
   .map-layout {
     grid-template-columns: 1fr;
   }
-}
-
-.map-controls {
-  display: flex;
-  flex-direction: column;
 }
 
 .map-canvas-panel {
@@ -51,12 +46,38 @@
   max-height: calc(100vh - 220px);
 }
 
-.map-reset-btn {
+/* Top-right overlay cluster on the canvas: host-supplied actions (e.g.
+   expand/collapse) plus the built-in Reset view. */
+.map-canvas-actions {
   position: absolute;
   top: 10px;
   right: 10px;
+  display: flex;
+  gap: 6px;
+}
+
+.map-canvas-actions .btn {
   padding: 6px 10px;
   font-size: 11px;
+}
+
+/* Security legend, overlaid bottom-left of the canvas. */
+.map-canvas-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  border: 1px solid var(--border-dim);
+  padding: 6px 8px;
+  pointer-events: none;
+}
+
+.map-canvas-legend .legend {
+  margin-top: 0;
+}
+
+.map-canvas-legend .legend-swatches {
+  flex-wrap: nowrap;
 }
 
 /* drei's <Html> already positions/transforms its own wrapper via the 3D
@@ -70,10 +91,6 @@
   min-width: 140px;
   transform: translate(14px, -50%);
   white-space: nowrap;
-}
-
-.map-detail-section {
-  margin-top: 20px;
 }
 
 .map-detail-actions {

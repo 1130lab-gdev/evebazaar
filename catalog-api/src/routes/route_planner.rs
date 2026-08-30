@@ -2,13 +2,19 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
 
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderValue, header},
+    response::IntoResponse,
+};
 use axum_extra::extract::Query;
 use serde::Deserialize;
 
 use crate::{
-    auth::{AuthUser, Role},
     db::{
         self,
         arbitrage::ArbitrageFilter,
@@ -19,11 +25,77 @@ use crate::{
     state::AppState,
 };
 
+/// In-process cache of computed itinerary sets, keyed on a deterministic
+/// debug render of the parsed request params. A route search is a
+/// branch-and-bound over the market firing up to `MAX_NODES_EXPLORED` SQL
+/// queries, and start systems are now restricted to four trade hubs, so
+/// the realistic key space is small and worth caching hard: entries are
+/// served regardless of age and the whole cache is dropped and re-warmed
+/// on a fixed interval (see `warm_route_cache`) rather than expiring
+/// per-entry. The interval is aligned with the ~5-minute market sync.
+const ROUTE_CACHE_INTERVAL: Duration = Duration::from_secs(300);
+const ROUTE_CACHE_MAX_ENTRIES: usize = 512;
+/// Upper bound on how many distinct cached searches the background task
+/// re-runs after each clear -- caps the recompute burst against Postgres.
+const ROUTE_CACHE_WARM_LIMIT: usize = 64;
+
+type RouteCache = Mutex<HashMap<String, (Arc<Vec<RoutePlan>>, RoutePlannerParams)>>;
+static ROUTE_CACHE: LazyLock<RouteCache> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn route_cache_key(params: &RoutePlannerParams) -> String {
+    format!("{params:?}")
+}
+
+fn route_cache_get(key: &str) -> Option<Arc<Vec<RoutePlan>>> {
+    ROUTE_CACHE.lock().unwrap().get(key).map(|(plans, _)| plans.clone())
+}
+
+fn route_cache_put(key: String, plans: Arc<Vec<RoutePlan>>, params: RoutePlannerParams) {
+    let mut cache = ROUTE_CACHE.lock().unwrap();
+    if cache.len() >= ROUTE_CACHE_MAX_ENTRIES && !cache.contains_key(&key) {
+        cache.clear();
+    }
+    cache.insert(key, (plans, params));
+}
+
+/// Drops every cached search on `ROUTE_CACHE_INTERVAL`, then recomputes the
+/// most recently cached ones so the common queries -- each of the four
+/// trade hubs against a handful of budgets -- stay warm across the market
+/// data refreshing underneath them. Spawned once from `main`.
+pub async fn warm_route_cache(state: AppState) {
+    loop {
+        tokio::time::sleep(ROUTE_CACHE_INTERVAL).await;
+        let stale: Vec<(String, RoutePlannerParams)> = {
+            let mut cache = ROUTE_CACHE.lock().unwrap();
+            let entries = cache.iter().map(|(k, (_, p))| (k.clone(), p.clone())).collect();
+            cache.clear();
+            entries
+        };
+        let mut warmed = 0usize;
+        for (key, params) in stale.into_iter().take(ROUTE_CACHE_WARM_LIMIT) {
+            match compute_plans(&state, params.clone()).await {
+                Ok(plans) => {
+                    route_cache_put(key, Arc::new(plans), params);
+                    warmed += 1;
+                }
+                Err(e) => tracing::debug!(error = %e, "route cache warm: skipped an entry"),
+            }
+        }
+        tracing::info!(warmed, "route cache cleared and re-warmed");
+    }
+}
+
 const DEFAULT_SALES_TAX_PCT: f64 = 7.5;
 const DEFAULT_MAX_LEGS: i32 = 3;
-const MAX_MAX_LEGS: i32 = 6;
-const DEFAULT_MAX_RESULTS: i32 = 3;
-const MAX_MAX_RESULTS: i32 = 5;
+// Held at 3 for now (search cost grows fast per extra leg); the frontend
+// caps its input to match.
+const MAX_MAX_LEGS: i32 = 3;
+/// No longer request-controlled: the search keeps its best `N` routes for
+/// the branch-and-bound prune floor (see `prune_threshold`) and returns
+/// them all. Set well above what a realistic market yields as *profitable*
+/// multi-hop routes, so in practice every profitable route found is
+/// returned, but bounded so a degenerate market can't blow up the response.
+const ROUTE_RESULTS_CAP: i32 = 25;
 /// Circuit breaker on total `find_opportunities` calls across the whole
 /// branch-and-bound search -- the profit-upper-bound pruning (see
 /// `dfs`/`estimate_max_hop_profit`) is what's *supposed* to keep the
@@ -62,17 +134,14 @@ const MAX_CANDIDATES_PER_NODE: usize = 20;
 /// commitment sorts first for `find_hop_candidates`'s best-first ordering.
 const HOP_ISK_COMMIT_FRACTIONS: &[f64] = &[1.0, 0.5, 0.25, 0.1];
 
-#[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
 pub struct RoutePlannerParams {
-    /// Loads cargo_capacity_m3/isk_available from a saved hauler. Mutually
-    /// exclusive with `cargo_capacity_m3`/`isk_available` -- if both are
-    /// given, the hauler wins.
-    pub hauler_id: Option<i64>,
+    /// Required. The hauling ship's cargo hold size, m³.
     pub cargo_capacity_m3: Option<f64>,
+    /// Required. ISK budget the route is allowed to spend.
     pub isk_available: Option<f64>,
-    /// Where the first leg must buy from -- required, either directly or
-    /// via a selected hauler's saved `home_system_id` (an explicit value
-    /// here still wins). An unconstrained first hop was tried and dropped:
+    /// Where the first leg must buy from -- required. An explicit value
+    /// here still wins. An unconstrained first hop was tried and dropped:
     /// with nothing narrowing `include_buy_system_ids`, the first hop's
     /// candidate count -- and so the branch-and-bound search's root
     /// branching factor -- scales with the whole market, which the
@@ -94,12 +163,6 @@ pub struct RoutePlannerParams {
     /// level (see `plan_routes`), and realistic hauling itineraries rarely
     /// run much longer than this anyway.
     pub max_legs: Option<i32>,
-    /// How many of the best routes found to return. Defaults to 3, clamped
-    /// to 5 -- purely a result-count/pruning-threshold knob now (see
-    /// `plan_routes`), not a search-width limit the way a beam search's
-    /// equivalent parameter would be: the search itself considers every
-    /// branch the profit bound doesn't rule out, not just this many.
-    pub max_results: Option<i32>,
     /// One of `high_sec_only`, `low_sec_plus` -- same vocabulary as the
     /// arbitrage scanner's own param. Unlike that scanner's version, this
     /// is a hard constraint here, not just a jump-distance bias: every
@@ -148,6 +211,9 @@ pub struct RoutePlannerParams {
     pub buy_security_class: Vec<String>,
     #[serde(default)]
     pub sell_security_class: Vec<String>,
+    /// When true, drop items that are illegal to haul in most of empire
+    /// space (boosters and slaves). Defaults to false.
+    pub exclude_illegal: Option<bool>,
 }
 
 /// The subset of arbitrage-scanner-style filters (see routes/arbitrage.rs's
@@ -174,6 +240,7 @@ struct OpportunityFilters {
     exclude_system_ids: Option<Vec<i32>>,
     buy_security_classes: Option<Vec<String>>,
     sell_security_classes: Option<Vec<String>>,
+    exclude_illegal: bool,
 }
 
 /// Intersects a `security_profile`-derived class list with an explicit,
@@ -216,37 +283,38 @@ fn allowed_security_classes(security_profile: Option<&str>) -> Option<Vec<String
     get,
     path = "/route-planner",
     tag = "route-planner",
-    security(("bearer_auth" = [])),
     params(RoutePlannerParams),
     responses(
         (status = 200, description = "Ranked candidate multi-hop hauling itineraries", body = Vec<RoutePlan>),
-        (status = 403, description = "Caller is not a dispatcher/admin"),
+        (status = 400, description = "Missing/invalid cargo, ISK, or start system"),
     ),
 )]
 pub async fn plan_route(
     State(state): State<AppState>,
-    AuthUser(user): AuthUser,
     Query(params): Query<RoutePlannerParams>,
-) -> AppResult<Json<Vec<RoutePlan>>> {
-    if !user.role.satisfies(Role::Dispatcher) {
-        return Err(AppError::Forbidden);
+) -> AppResult<impl IntoResponse> {
+    // Handler-set (overrides the router's 60s default): a route plan is
+    // held in-process until the next cache clear (~5 min, see
+    // `warm_route_cache`), so the client hint matches.
+    let cache_headers = [(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=300"))];
+    let key = route_cache_key(&params);
+    if let Some(plans) = route_cache_get(&key) {
+        return Ok((cache_headers, Json(plans)));
     }
-    let hauler = match params.hauler_id {
-        Some(id) => Some(db::haulers::get_hauler(&state.db, id).await?.ok_or(AppError::NotFound)?),
-        None => None,
-    };
-    let (cargo_capacity_m3, isk_available) = match &hauler {
-        Some(hauler) => (hauler.cargo_capacity_m3, hauler.isk_available),
-        None => {
-            let cargo = params
-                .cargo_capacity_m3
-                .ok_or_else(|| AppError::BadRequest("hauler_id or cargo_capacity_m3 is required".to_string()))?;
-            let isk = params
-                .isk_available
-                .ok_or_else(|| AppError::BadRequest("hauler_id or isk_available is required".to_string()))?;
-            (cargo, isk)
-        }
-    };
+    let plans = Arc::new(compute_plans(&state, params.clone()).await?);
+    route_cache_put(key, plans.clone(), params);
+    Ok((cache_headers, Json(plans)))
+}
+
+/// Everything `plan_route` does minus the HTTP cache wrapper -- also
+/// called by `warm_route_cache` to repopulate hot entries after a clear.
+async fn compute_plans(state: &AppState, params: RoutePlannerParams) -> AppResult<Vec<RoutePlan>> {
+    let cargo_capacity_m3 = params
+        .cargo_capacity_m3
+        .ok_or_else(|| AppError::BadRequest("cargo_capacity_m3 is required".to_string()))?;
+    let isk_available = params
+        .isk_available
+        .ok_or_else(|| AppError::BadRequest("isk_available is required".to_string()))?;
     if cargo_capacity_m3 <= 0.0 {
         return Err(AppError::BadRequest("cargo_capacity_m3 must be positive".to_string()));
     }
@@ -255,19 +323,12 @@ pub async fn plan_route(
     }
 
     let max_legs = params.max_legs.unwrap_or(DEFAULT_MAX_LEGS).clamp(1, MAX_MAX_LEGS);
-    let max_results = params.max_results.unwrap_or(DEFAULT_MAX_RESULTS).clamp(1, MAX_MAX_RESULTS);
+    let max_results = ROUTE_RESULTS_CAP;
     let sales_tax_pct = params.sales_tax_pct.unwrap_or(DEFAULT_SALES_TAX_PCT);
-    // Both fall back to the selected hauler's saved defaults when the
-    // request itself didn't specify one, so a hauler's spec doesn't need
-    // re-entering on every plan -- an explicit request param still wins.
-    let security_profile = params
-        .security_profile
-        .clone()
-        .or_else(|| hauler.as_ref().and_then(|h| h.route_security_profile.clone()));
+    let security_profile = params.security_profile.clone();
     let start_system_id = params
         .start_system_id
-        .or_else(|| hauler.as_ref().and_then(|h| h.home_system_id))
-        .ok_or_else(|| AppError::BadRequest("start_system_id is required (set it directly, or select a hauler with a saved home_system_id)".to_string()))?;
+        .ok_or_else(|| AppError::BadRequest("start_system_id is required".to_string()))?;
     let return_to_start = params.return_to_start.unwrap_or(false);
     if return_to_start && max_legs < 2 {
         return Err(AppError::BadRequest(
@@ -296,6 +357,7 @@ pub async fn plan_route(
         exclude_system_ids: (!params.exclude_system_id.is_empty()).then_some(params.exclude_system_id),
         buy_security_classes: intersect_classes(allowed_security_classes.clone(), params.buy_security_class),
         sell_security_classes: intersect_classes(allowed_security_classes, params.sell_security_class),
+        exclude_illegal: params.exclude_illegal.unwrap_or(false),
     };
     let graph = state.jump_graph().await?;
 
@@ -330,7 +392,7 @@ pub async fn plan_route(
 
     fill_route_jumps(&mut plans, graph, multipliers);
 
-    Ok(Json(plans))
+    Ok(plans)
 }
 
 /// One in-progress candidate itinerary during the branch-and-bound search
@@ -474,6 +536,7 @@ async fn find_hop_candidates(
         cargo_capacity_m3: Some(cargo_capacity_m3),
         require_bid_exceeds_offer: true,
         sales_tax_pct,
+        exclude_illegal: opp_filters.exclude_illegal,
         ..Default::default()
     };
     let opportunities = db::arbitrage::find_opportunities(pool, &filter).await?;
@@ -673,6 +736,7 @@ async fn estimate_max_hop_profit(
         min_volume_available: opp_filters.min_volume_available,
         max_total_cost: opp_filters.max_total_cost,
         exclude_system_ids: opp_filters.exclude_system_ids.clone(),
+        exclude_illegal: opp_filters.exclude_illegal,
         ..Default::default()
     };
     let opportunities = db::arbitrage::find_opportunities(pool, &filter).await?;
@@ -716,6 +780,13 @@ struct DfsConfig {
 /// early and could, in principle, keep going.
 fn maybe_record(route: &PartialRoute, cfg: &DfsConfig, best: &mut Vec<PartialRoute>) {
     if route.legs.is_empty() {
+        return;
+    }
+    // Never report a route that doesn't come out ahead. Individual hops
+    // are already constrained to profitable pairs (`require_bid_exceeds_offer`),
+    // but tax and a marginal final hop can still net out flat or negative;
+    // those aren't results worth showing.
+    if route.total_profit <= 0.0 {
         return;
     }
     if cfg.return_to_start && route.current_system_id != route.origin_system_id {

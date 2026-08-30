@@ -1,4 +1,3 @@
-mod auth;
 mod config;
 mod db;
 mod domain;
@@ -23,13 +22,16 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::build_pool(&config.database_url)?;
     tracing::info!("connected to database");
 
-    let exchange_pool = db::build_pool(&config.exchange_database_url)?;
-    tracing::info!("connected to exchange database (read-only, for auth)");
-
     db::bootstrap::run(&pool).await?;
     tracing::info!("search index bootstrapped");
 
-    let state = AppState::new(pool, exchange_pool);
+    let state = AppState::new(pool);
+
+    // Background: drop and re-warm the route-planner cache on a fixed
+    // interval so the common trade-hub searches stay hot as the market
+    // data refreshes underneath them.
+    tokio::spawn(routes::route_planner::warm_route_cache(state.clone()));
+
     let app = routes::build_router(state);
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
