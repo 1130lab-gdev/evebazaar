@@ -1,0 +1,32 @@
+# Explicit project name -- not "database", to avoid the exact collision
+# documented in project memory (database/ and database/database/ both
+# basename "database"). Also distinct from that dir's own "eve-db" (Postgres)
+# project name.
+name: database-sync
+
+# eve-database (Postgres) is its own stack, started separately via
+# database/database/docker-compose.yml (project name "eve-db", see start.sh).
+# Joining its network lets this service resolve the DB by container name
+# ("eve-database") instead of hardcoding an IP. Bring that stack up first --
+# `docker compose up` here fails fast if the network doesn't exist yet.
+networks:
+  eve-db:
+    external: true
+    name: eve-db_default
+
+services:
+  # Public ESI endpoints only, no auth/OAuth secrets needed. Defaults to the
+  # mktdata polling loop -- run the one-time full sync first with:
+  #   docker compose run --rm database --mode sync
+  database:
+    container_name: database
+    build:
+      # Context must be the repo root (not this dir), since this crate
+      # depends on the sibling ../rfesi crate (path dependency).
+      context: ..
+      dockerfile: database/Dockerfile
+    image: database:latest
+    networks: [eve-db]
+    environment:
+      DATABASE_URL: postgres://eve:eve@eve-database:5432/eve
+    restart: unless-stopped

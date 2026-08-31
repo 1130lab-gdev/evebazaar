@@ -1,0 +1,19 @@
+# Explicit project name -- own name per project now that each project has
+# its own compose file.
+name: evebazaar
+
+services:
+  # API base URLs are baked in at build time (browser-side code, not
+  # container-side), so they point at the *host*-mapped catalog-api/map-api
+  # ports, not any container network.
+  evebazaar:
+    container_name: evebazaar
+    build:
+      context: .
+      args:
+        VITE_CATALOG_API_BASE_URL: ${VITE_CATALOG_API_BASE_URL:-http://localhost:8091}
+        VITE_MAP_API_BASE_URL: ${VITE_MAP_API_BASE_URL:-http://localhost:8092}
+    image: evebazaar:latest
+    ports:
+      - "5173:80"
+    restart: unless-stopped

@@ -149,6 +149,9 @@ target/
 # start.sh/stop.sh runtime state (pids, logs)
 .run/
 
+# docker image tars saved by create-containers.sh
+Containers/
+
 # Local editor/tool config
 .claude/settings.local.json
 .DS_Store

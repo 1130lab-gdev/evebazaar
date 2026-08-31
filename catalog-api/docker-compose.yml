@@ -1,0 +1,28 @@
+# Explicit project name -- avoids the directory-basename collision documented
+# in project memory (two dirs named "database" both defaulting to project
+# name "database"). Own name per project now that each project has its own
+# compose file.
+name: catalog-api
+
+# eve-database (Postgres) is its own stack, started separately via
+# database/database/docker-compose.yml (project name "eve-db", see start.sh).
+# Joining its network lets catalog-api resolve the DB by container name
+# ("eve-database") instead of hardcoding an IP. Bring that stack up first --
+# `docker compose up` here fails fast if the network doesn't exist yet.
+networks:
+  eve-db:
+    external: true
+    name: eve-db_default
+
+services:
+  catalog-api:
+    container_name: catalog-api
+    build:
+      context: .
+    image: catalog-api:latest
+    networks: [eve-db]
+    ports:
+      - "8091:8091"
+    environment:
+      DATABASE_URL: postgres://eve:eve@eve-database:5432/eve
+    restart: unless-stopped
