@@ -1,19 +1,24 @@
-# Explicit project name -- own name per project now that each project has
-# its own compose file.
+# evebazaar.com frontend -- static bundle served by nginx (in-image), sat
+# behind the VPS's own nginx which terminates TLS and also routes
+# /api/catalog + /api/map to the APIs on the same domain.
+#
+#   local:  docker compose up -d --build
+#   VPS:    docker compose pull && docker compose up -d       (REGISTRY set in .env)
+#
+# VITE_* are baked in at BUILD time, so the image is environment-specific:
+# build it with the values the target will use (relative /api/... paths for
+# the single-domain VPS, http://localhost:809x for local dev).
 name: evebazaar
 
 services:
-  # API base URLs are baked in at build time (browser-side code, not
-  # container-side), so they point at the *host*-mapped catalog-api/map-api
-  # ports, not any container network.
   evebazaar:
     container_name: evebazaar
+    image: ${REGISTRY:+${REGISTRY}/}evebazaar:${TAG:-latest}
     build:
       context: .
       args:
         VITE_CATALOG_API_BASE_URL: ${VITE_CATALOG_API_BASE_URL:-http://localhost:8091}
         VITE_MAP_API_BASE_URL: ${VITE_MAP_API_BASE_URL:-http://localhost:8092}
-    image: evebazaar:latest
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     restart: unless-stopped

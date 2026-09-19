@@ -1,41 +1,49 @@
-# Explicit project name -- without this, Compose derives the project name
-# from the containing directory's basename ("database"), which collided
-# with omniverse.exchange/exchange-webapi/database/docker-compose.yml (also
-# in a directory named "database"): running one after the other recreated
-# -- not added alongside -- whatever container the other one started,
-# silently replacing eve-database's container with the exchange-db image
-# on 2026-08-22. No data was lost (the eve-db-data named volume survived
-# untouched -- only the container attached to it changed), but see the
-# project memory "docker-compose-project-name-collision" for the full story.
+# Postgres + ESI schema -- its own stack, separate from the sync tool
+# (database/) and the read-only APIs (catalog-api/, map-api/), all of which
+# reach it as `eve-database` on the shared evebazaar-network bridge.
+#
+# Stock postgres image, no custom build -- docker-entrypoint-initdb.d/ is
+# bind-mounted in instead of baked into an image. Postgres only runs those
+# scripts once, against a fresh (empty) data volume, so this has no effect
+# on the already-populated volume in normal use.
 name: eve-db
 
 services:
   db:
-    build: .
+    image: postgres:16-alpine
     container_name: eve-database
     restart: unless-stopped
     environment:
-      POSTGRES_USER: eve
-      POSTGRES_PASSWORD: eve
-      POSTGRES_DB: eve
+      POSTGRES_USER: ${POSTGRES_USER:-eve}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eve}
+      POSTGRES_DB: ${POSTGRES_DB:-eve}
     ports:
-      - "5532:5432"
+      - "127.0.0.1:5532:5432"
     volumes:
       - eve-db-data:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro
+    networks:
+      - evebazaar-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U eve -d eve"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
-  # Pinned to the pre-existing volume by its literal name rather than left
-  # to project-prefixing: adding the "eve-db" project name above changes
-  # the *default* volume name from "database_eve-db-data" (this file's
-  # original implicit project) to "eve-db_eve-db-data", which would silently
-  # point a freshly-named-project container at an empty new volume instead
-  # of the one holding the actual synced ESI data. `external` pins it to the
-  # real one regardless of project name.
+  # Pinned by literal name rather than left to project-prefixing: this
+  # project is named "eve-db", but the real synced data lives in the
+  # volume named after this dir's old implicit project ("database",
+  # pre-dating the explicit `name:` above). Compose would otherwise default
+  # to a brand-new empty `eve-db_eve-db-data` volume. DB_DATA_VOLUME lets
+  # the VPS point at its own freshly-created volume instead. See project
+  # memory "docker-compose-project-name-collision" for the incident this
+  # fixes.
   eve-db-data:
     external: true
-    name: database_eve-db-data
+    name: ${DB_DATA_VOLUME:-database_eve-db-data}
+
+networks:
+  evebazaar-network:
+    name: evebazaar-network
+    external: true

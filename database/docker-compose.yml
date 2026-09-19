@@ -1,32 +1,29 @@
-# Explicit project name -- not "database", to avoid the exact collision
-# documented in project memory (database/ and database/database/ both
-# basename "database"). Also distinct from that dir's own "eve-db" (Postgres)
-# project name.
+# database -- ESI sync tool. One-time full crawl (`--mode sync`), then a
+# `--mode mktdata` polling loop (the default CMD). Reaches Postgres as
+# `eve-database` on the shared evebazaar-network bridge; see
+# database/database/docker-compose.yml for that stack.
+#
+#   local:  docker compose up -d --build
+#   VPS:    docker compose pull && docker compose up -d      (REGISTRY set in .env)
 name: database-sync
 
-# eve-database (Postgres) is its own stack, started separately via
-# database/database/docker-compose.yml (project name "eve-db", see start.sh).
-# Joining its network lets this service resolve the DB by container name
-# ("eve-database") instead of hardcoding an IP. Bring that stack up first --
-# `docker compose up` here fails fast if the network doesn't exist yet.
-networks:
-  eve-db:
-    external: true
-    name: eve-db_default
-
 services:
-  # Public ESI endpoints only, no auth/OAuth secrets needed. Defaults to the
-  # mktdata polling loop -- run the one-time full sync first with:
-  #   docker compose run --rm database --mode sync
   database:
-    container_name: database
     build:
-      # Context must be the repo root (not this dir), since this crate
-      # depends on the sibling ../rfesi crate (path dependency).
       context: ..
       dockerfile: database/Dockerfile
-    image: database:latest
-    networks: [eve-db]
-    environment:
-      DATABASE_URL: postgres://eve:eve@eve-database:5432/eve
+    image: ${REGISTRY:+${REGISTRY}/}database:${TAG:-latest}
+    container_name: database
     restart: unless-stopped
+    # Connection string assembled from POSTGRES_USER / POSTGRES_PASSWORD /
+    # POSTGRES_DB in database/.env (compose auto-loads it). USER and
+    # PASSWORD are required. Keep in sync with database/database/.env.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:?set POSTGRES_USER in database/.env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in database/.env}@${POSTGRES_HOST:-eve-database}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-eve}}
+    networks:
+      - evebazaar-network
+
+networks:
+  evebazaar-network:
+    name: evebazaar-network
+    external: true

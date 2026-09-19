@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     // data refreshes underneath them.
     tokio::spawn(routes::route_planner::warm_route_cache(state.clone()));
 
-    let app = routes::build_router(state);
+    let app = routes::build_router(state, &config.api_base_path);
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     tracing::info!(addr = %config.listen_addr, "listening");

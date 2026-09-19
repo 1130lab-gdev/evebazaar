@@ -21,7 +21,17 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::state::AppState;
 use openapi::ApiDoc;
 
-pub fn build_router(state: AppState) -> Router {
+pub fn build_router(state: AppState, api_base_path: &str) -> Router {
+    // Normalise: no trailing slash, guaranteed leading slash when non-empty.
+    // `Router::nest` panics on a path that doesn't start with '/', so fix it
+    // here rather than trip over a misconfigured API_BASE_PATH at startup.
+    let base = api_base_path.trim().trim_end_matches('/');
+    let base = if base.is_empty() || base.starts_with('/') {
+        base.to_string()
+    } else {
+        format!("/{base}")
+    };
+
     // Every route here is public and unauthenticated -- catalog-api has no
     // accounts or roles. Nothing depends on the caller's origin either, so
     // there's no reason to pin one; wildcard avoids origin-mismatch
@@ -40,7 +50,7 @@ pub fn build_router(state: AppState) -> Router {
         HeaderValue::from_static("public, max-age=60"),
     );
 
-    Router::new()
+    let routes = Router::new()
         .route("/categories", get(taxonomy::list_categories))
         .route("/market-groups", get(taxonomy::list_market_groups))
         .route("/regions", get(taxonomy::list_regions))
@@ -49,8 +59,27 @@ pub fn build_router(state: AppState) -> Router {
         .route("/market/orders", get(orders::list_orders))
         .route("/market/arbitrage", get(arbitrage::list_opportunities))
         .route("/route-planner", get(route_planner::plan_route))
-        .route("/price-checks", post(price_checks::check_prices))
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .route("/price-checks", post(price_checks::check_prices));
+
+    let routes = if base.is_empty() {
+        routes
+    } else {
+        Router::new().nest(&base, routes)
+    };
+
+    // Swagger UI and the OpenAPI JSON have to carry the prefix explicitly:
+    // the URL passed to `.url()` is baked into the served page, so it can't
+    // rely on `nest` rewriting it. The `servers` entry makes "Try it out"
+    // hit the prefixed path too.
+    let mut api_doc = ApiDoc::openapi();
+    if !base.is_empty() {
+        api_doc.servers = Some(vec![utoipa::openapi::Server::new(&base)]);
+    }
+    let swagger = SwaggerUi::new(format!("{base}/swagger-ui"))
+        .url(format!("{base}/api-docs/openapi.json"), api_doc);
+
+    routes
+        .merge(swagger)
         .layer(cache)
         .layer(cors)
         .with_state(state)

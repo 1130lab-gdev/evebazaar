@@ -14,4 +14,12 @@ pub struct Config {
     /// it, same posture as risk's `eve_database_url`.
     #[arg(long, env = "DATABASE_URL", default_value = "postgres://eve:eve@localhost:5532/eve")]
     pub database_url: String,
+
+    /// Path prefix every route (API, Swagger UI, OpenAPI JSON) is served
+    /// under -- set to `/api/catalog` when this sits behind a shared-domain
+    /// reverse proxy that forwards `/api/catalog/*` here without stripping
+    /// the prefix. Empty (the default) serves at the root, as before. A
+    /// missing leading slash and any trailing slash are fixed up.
+    #[arg(long, env = "API_BASE_PATH", default_value = "")]
+    pub api_base_path: String,
 }
