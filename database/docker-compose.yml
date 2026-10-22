@@ -1,6 +1,6 @@
 # database -- ESI sync tool. One-time full crawl (`--mode sync`), then a
 # `--mode mktdata` polling loop (the default CMD). Reaches Postgres as
-# `eve-database` on the shared evebazaar-network bridge; see
+# `evebazaar-database` on the shared evebazaar-network bridge; see
 # database/database/docker-compose.yml for that stack.
 #
 #   local:  docker compose up -d --build
@@ -19,7 +19,7 @@ services:
     # POSTGRES_DB in database/.env (compose auto-loads it). USER and
     # PASSWORD are required. Keep in sync with database/database/.env.
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:?set POSTGRES_USER in database/.env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in database/.env}@${POSTGRES_HOST:-eve-database}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-eve}}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:?set POSTGRES_USER in database/.env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in database/.env}@${POSTGRES_HOST:-evebazaar-database}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-eve}}
     networks:
       - evebazaar-network
 

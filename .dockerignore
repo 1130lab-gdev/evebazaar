@@ -20,3 +20,7 @@ map-sandbox
 tgi
 catalog-api
 map-api
+
+# The Postgres stack lives inside the crate dir but is its own compose
+# project -- keep it out of the Rust image's build context.
+database/database

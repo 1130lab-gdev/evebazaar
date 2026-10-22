@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop and remove catalog-api's container, image, and saved tar file.
 #
-# evebazaar-network (shared with the other services) and the eve-database
+# evebazaar-network (shared with the other services) and the evebazaar-database
 # container are left alone -- owned by database/database/docker-compose.yml,
 # not this file.
 set -uo pipefail

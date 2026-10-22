@@ -1,17 +1,15 @@
 # Postgres + ESI schema -- its own stack, separate from the sync tool
 # (database/) and the read-only APIs (catalog-api/, map-api/), all of which
-# reach it as `eve-database` on the shared evebazaar-network bridge.
+# reach it as `evebazaar-database` on the shared evebazaar-network bridge.
 #
-# Stock postgres image, no custom build -- docker-entrypoint-initdb.d/ is
-# bind-mounted in instead of baked into an image. Postgres only runs those
-# scripts once, against a fresh (empty) data volume, so this has no effect
-# on the already-populated volume in normal use.
+# Explicit project name: without it Compose derives "database" from this
+# folder, which collides with other "database" projects on the same host.
 name: eve-db
 
 services:
   db:
     image: postgres:16-alpine
-    container_name: eve-database
+    container_name: evebazaar-database
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-eve}
@@ -31,16 +29,7 @@ services:
       retries: 5
 
 volumes:
-  # Pinned by literal name rather than left to project-prefixing: this
-  # project is named "eve-db", but the real synced data lives in the
-  # volume named after this dir's old implicit project ("database",
-  # pre-dating the explicit `name:` above). Compose would otherwise default
-  # to a brand-new empty `eve-db_eve-db-data` volume. DB_DATA_VOLUME lets
-  # the VPS point at its own freshly-created volume instead. See project
-  # memory "docker-compose-project-name-collision" for the incident this
-  # fixes.
   eve-db-data:
-    external: true
     name: ${DB_DATA_VOLUME:-database_eve-db-data}
 
 networks:

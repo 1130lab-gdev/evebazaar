@@ -1,6 +1,6 @@
 # Build context must be the repo root (not database/), since this crate
 # depends on the sibling ../rfesi crate (path dependency, not on crates.io).
-# See docker-compose.yml: build.context: . / build.dockerfile: database/Dockerfile
+# See docker-compose.yml: build.context: .. / build.dockerfile: database/Dockerfile
 
 FROM rust:1-bookworm AS build
 WORKDIR /app

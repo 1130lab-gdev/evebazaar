@@ -22,7 +22,7 @@ PID_DIR="$RUN_DIR/pids"
 LOG_DIR="$RUN_DIR/logs"
 mkdir -p "$PID_DIR" "$LOG_DIR"
 
-EVE_DB_CONTAINER=eve-database
+EVE_DB_CONTAINER=evebazaar-database
 EVE_DB_COMPOSE="$ROOT/database/database/docker-compose.yml"
 EVE_DB_PORT=5532
 

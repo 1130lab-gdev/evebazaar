@@ -12,13 +12,13 @@ Four stacks, started independently, sharing one bridge network:
 
 | folder | stack | container | host port |
 |---|---|---|---|
-| `database/database/` | Postgres + ESI schema | `eve-database` | 127.0.0.1:5532 |
+| `database/database/` | Postgres + ESI schema | `evebazaar-database` | 127.0.0.1:5532 |
 | `database/` | ESI sync | `database` | — |
 | `catalog-api/` | read-only API | `catalog-api` | 127.0.0.1:8091 |
 | `map-api/` | read-only API | `map-api` | 127.0.0.1:8092 |
 
 They find each other over the external `evebazaar-network` bridge by
-container name. Postgres is `eve-database` (or `db`) on it. API host ports
+container name. Postgres is `evebazaar-database` (or `db`) on it. API host ports
 bind to `127.0.0.1` — a TLS reverse proxy goes in front. The frontend is
 deployed separately.
 
@@ -65,14 +65,14 @@ Fill each `.env` from its `.env.example`. **`POSTGRES_USER` /
 (compose refuses to start without them, so the eve/eve/eve dev defaults
 can't boot here by accident). Set `REGISTRY` (and `TAG`) in `database/.env`,
 `catalog-api/.env`, and `map-api/.env` (Postgres pulls the stock image, no
-registry needed), and `DB_DATA_VOLUME` in `database/database/.env`.
+registry needed), and optionally `DB_DATA_VOLUME` in `database/database/.env` (the data volume
+is created on first `up`).
 `chmod 600 */**.env`.
 
 ## 3. One-time setup
 
 ```bash
-docker network create evebazaar-network
-docker volume create evebazaar-db-data          # match DB_DATA_VOLUME in database/database/.env
+docker network create evebazaar-network        # external in every compose file -- must exist first
 ```
 
 ## 4. Bring it up
@@ -125,7 +125,7 @@ docker compose -f database/database/docker-compose.yml exec db \
 
 Then update all four `.env` files and `up -d` the three consumer stacks.
 Starting over: `docker compose -f database/database/docker-compose.yml down -v`
-(destroys the volume), re-`docker volume create`, repeat from step 3.
+(destroys the volume), repeat from step 3.
 
 ## Reverse proxy — single domain
 

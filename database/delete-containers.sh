@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Stop and remove the database (sync) container, image, and saved tar file.
 #
-# eve-db_default (the Postgres network) and the eve-database container are
-# left alone -- owned by database/database/docker-compose.yml, not this file.
+# evebazaar-network (shared with the other services) and the evebazaar-database
+# container are left alone -- owned by database/database/docker-compose.yml,
+# not this file.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
