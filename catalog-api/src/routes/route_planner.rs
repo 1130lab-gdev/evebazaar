@@ -434,6 +434,18 @@ struct PartialRoute {
 /// cost, opportunity)`. `item_profit`/`cost` are already sized to `units`.
 type ScoredLeg = (f64, i64, f64, ArbitrageOpportunity);
 
+/// `find_opportunities` results already fetched during this one search,
+/// keyed on the only parts of the hop filter that vary from node to node:
+/// `(buy system, include_sell_system_ids, exclude_system_ids)`. Every
+/// other filter field is fixed for the whole request. Each (buy, sell) pair
+/// becomes several `HopCandidate`s, one per `HOP_ISK_COMMIT_FRACTIONS`
+/// level, and they all lead to the same next node with the same visited
+/// set. They differ only in `remaining_isk`, which the query never sees
+/// (only `pack_hop` uses it). Without this, each of those siblings
+/// re-ran the identical ~1s market scan.
+type HopQueryKey = (i32, Option<Vec<i32>>, Option<Vec<i32>>);
+type HopQueryMemo = Mutex<HashMap<HopQueryKey, Arc<Vec<ArbitrageOpportunity>>>>;
+
 /// One candidate next stop: buy at `buy_system_id`, sell at
 /// `sell_system_id`, carrying whichever items `pack_hop` greedily selected
 /// to fill out the hold on that specific pairing. A "hop" -- not a single
@@ -488,6 +500,7 @@ async fn find_hop_candidates(
     must_sell_at: Option<i32>,
     sell_corridor: Option<&[i32]>,
     opp_filters: &OpportunityFilters,
+    memo: &HopQueryMemo,
 ) -> AppResult<Vec<HopCandidate>> {
     let include_sell_system_ids = match (must_sell_at, sell_corridor) {
         (Some(id), _) => Some(vec![id]),
@@ -539,10 +552,28 @@ async fn find_hop_candidates(
         exclude_illegal: opp_filters.exclude_illegal,
         ..Default::default()
     };
-    let opportunities = db::arbitrage::find_opportunities(pool, &filter).await?;
+    let key: HopQueryKey = (
+        route.current_system_id,
+        filter.include_sell_system_ids.clone(),
+        filter.exclude_system_ids.as_ref().map(|ids| {
+            let mut ids = ids.clone();
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        }),
+    );
+    let cached = memo.lock().unwrap().get(&key).cloned();
+    let opportunities = match cached {
+        Some(opps) => opps,
+        None => {
+            let opps = Arc::new(db::arbitrage::find_opportunities(pool, &filter).await?);
+            memo.lock().unwrap().insert(key, opps.clone());
+            opps
+        }
+    };
 
     let mut by_pair: HashMap<(i32, i32), Vec<ArbitrageOpportunity>> = HashMap::new();
-    for opp in opportunities {
+    for opp in opportunities.iter().cloned() {
         by_pair.entry((opp.buy_system_id, opp.sell_system_id)).or_default().push(opp);
     }
 
@@ -767,6 +798,7 @@ struct DfsConfig {
     max_hop_profit: f64,
     max_results: usize,
     opportunity_filters: OpportunityFilters,
+    hop_query_memo: HopQueryMemo,
 }
 
 /// If `route` is a genuine candidate result -- non-empty, and, when
@@ -866,6 +898,7 @@ fn dfs<'a>(
             must_sell_at,
             cfg.sell_corridor.as_deref(),
             &cfg.opportunity_filters,
+            &cfg.hop_query_memo,
         )
         .await?;
         *nodes_explored += 1;
@@ -911,6 +944,7 @@ async fn plan_routes(pool: deadpool_postgres::Pool, params: PlanRoutesParams) ->
         max_hop_profit,
         max_results: max_results as usize,
         opportunity_filters,
+        hop_query_memo: Mutex::new(HashMap::new()),
     };
 
     let seed = PartialRoute {
@@ -934,6 +968,12 @@ async fn plan_routes(pool: deadpool_postgres::Pool, params: PlanRoutesParams) ->
     let mut best: Vec<PartialRoute> = Vec::new();
     let mut nodes_explored = 0usize;
     dfs(&pool, seed, 0, &cfg, &mut best, &mut nodes_explored).await?;
+    tracing::info!(
+        nodes_explored,
+        hop_queries = cfg.hop_query_memo.lock().unwrap().len(),
+        routes = best.len(),
+        "route search finished"
+    );
 
     Ok(best
         .into_iter()
