@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -19,6 +17,7 @@ use crate::{
         self,
         arbitrage::ArbitrageFilter,
         jumps::{JumpGraph, SecurityMultipliers},
+        market_books::{EligibleType, MarketBooks},
     },
     domain::{ArbitrageOpportunity, RoutePlan, RoutePlanLeg},
     error::{AppError, AppResult},
@@ -27,8 +26,8 @@ use crate::{
 
 /// In-process cache of computed itinerary sets, keyed on a deterministic
 /// debug render of the parsed request params. A route search is a
-/// branch-and-bound over the market firing up to `MAX_NODES_EXPLORED` SQL
-/// queries, and start systems are now restricted to four trade hubs, so
+/// branch-and-bound over the market exploring up to `MAX_NODES_EXPLORED`
+/// nodes, and start systems are now restricted to four trade hubs, so
 /// the realistic key space is small and worth caching hard: entries are
 /// served regardless of age and the whole cache is dropped and re-warmed
 /// on a fixed interval (see `warm_route_cache`) rather than expiring
@@ -96,14 +95,14 @@ const MAX_MAX_LEGS: i32 = 3;
 /// multi-hop routes, so in practice every profitable route found is
 /// returned, but bounded so a degenerate market can't blow up the response.
 const ROUTE_RESULTS_CAP: i32 = 25;
-/// Circuit breaker on total `find_opportunities` calls across the whole
+/// Circuit breaker on total node expansions (one `find_opportunities` each) across the whole
 /// branch-and-bound search -- the profit-upper-bound pruning (see
 /// `dfs`/`estimate_max_hop_profit`) is what's *supposed* to keep the
 /// search small, but it's a heuristic bound, not a guarantee, and a
 /// pathological request (e.g. a huge cargo hold against a market with
 /// many similarly-priced options) could still branch wide before the
 /// bound bites. This caps worst-case latency at a known multiple of a
-/// single query's cost regardless of how well the bound performs on any
+/// single expansion's cost regardless of how well the bound performs on any
 /// given request.
 const MAX_NODES_EXPLORED: usize = 200;
 /// How many candidate next hops (see `HopCandidate`), best-first by
@@ -113,7 +112,7 @@ const MAX_NODES_EXPLORED: usize = 200;
 /// fixed one), and against a ~20k-item catalog even a single well-
 /// connected buy system routinely has 100+ distinct profitable sell
 /// destinations. The profit bound in `dfs` *should* be what keeps that
-/// fan-out from costing a query per candidate, but it can't: with
+/// fan-out from costing an expansion per candidate, but it can't: with
 /// `remaining_legs_after >= 1`, the bound's `remaining_legs_after *
 /// max_hop_profit` ceiling term is -- in a market where good multi-leg
 /// chains are lumpy/sparse rather than smoothly distributed -- routinely
@@ -249,7 +248,7 @@ struct OpportunityFilters {
 /// both means no constraint at all. An intersection that comes out empty
 /// (e.g. `high_sec_only` combined with an explicit `lowsec` pick) is kept
 /// as `Some(vec![])`, not silently dropped back to `None` -- that
-/// correctly matches zero rows in SQL, which is the right answer to a
+/// correctly matches no system at all, which is the right answer to a
 /// request that contradicts itself, not "ignore one of the two asks."
 fn intersect_classes(profile: Option<Vec<String>>, explicit: Vec<String>) -> Option<Vec<String>> {
     let explicit = (!explicit.is_empty()).then_some(explicit);
@@ -267,7 +266,7 @@ fn intersect_classes(profile: Option<Vec<String>>, explicit: Vec<String>) -> Opt
 /// count/distance for a preference without actually restricting where a
 /// route is allowed to buy or sell. `None` (the "fastest" default, no
 /// preference) applies no constraint. Applied to both `buy_security_classes`
-/// and `sell_security_classes` in every hop's query (see
+/// and `sell_security_classes` in every hop's search (see
 /// `find_hop_candidates`/`estimate_max_hop_profit`) so a "high_sec_only"
 /// route can't end up buying or selling in low/null-sec on either side of
 /// any leg, including the first.
@@ -373,8 +372,19 @@ async fn compute_plans(state: &AppState, params: RoutePlannerParams) -> AppResul
         None => None,
     };
 
+    let books = state.market_books().await?;
+    let types = db::market_books::load_eligible_types(
+        &state.db,
+        opportunity_filters.name_query.as_deref(),
+        opportunity_filters.category_ids.as_deref(),
+        opportunity_filters.market_group_ids.as_deref(),
+        opportunity_filters.exclude_illegal,
+    )
+    .await?;
+
     let mut plans = plan_routes(
-        state.db.clone(),
+        &books,
+        &types,
         PlanRoutesParams {
             start_system_id,
             target_system_id: params.target_system_id,
@@ -387,8 +397,7 @@ async fn compute_plans(state: &AppState, params: RoutePlannerParams) -> AppResul
             return_to_start,
             opportunity_filters,
         },
-    )
-    .await?;
+    );
 
     fill_route_jumps(&mut plans, graph, multipliers);
 
@@ -433,18 +442,6 @@ struct PartialRoute {
 /// One scored, but not-yet-committed, item purchase: `(item_profit, units,
 /// cost, opportunity)`. `item_profit`/`cost` are already sized to `units`.
 type ScoredLeg = (f64, i64, f64, ArbitrageOpportunity);
-
-/// `find_opportunities` results already fetched during this one search,
-/// keyed on the only parts of the hop filter that vary from node to node:
-/// `(buy system, include_sell_system_ids, exclude_system_ids)`. Every
-/// other filter field is fixed for the whole request. Each (buy, sell) pair
-/// becomes several `HopCandidate`s, one per `HOP_ISK_COMMIT_FRACTIONS`
-/// level, and they all lead to the same next node with the same visited
-/// set. They differ only in `remaining_isk`, which the query never sees
-/// (only `pack_hop` uses it). Without this, each of those siblings
-/// re-ran the identical ~1s market scan.
-type HopQueryKey = (i32, Option<Vec<i32>>, Option<Vec<i32>>);
-type HopQueryMemo = Mutex<HashMap<HopQueryKey, Arc<Vec<ArbitrageOpportunity>>>>;
 
 /// One candidate next stop: buy at `buy_system_id`, sell at
 /// `sell_system_id`, carrying whichever items `pack_hop` greedily selected
@@ -492,16 +489,16 @@ struct HopCandidate {
 /// `opp_filters`' `exclude_system_ids` (user-picked, e.g. "never route
 /// through nullsec X") is unioned with the search's own visited-systems
 /// exclusion, not a replacement for it -- both apply simultaneously.
-async fn find_hop_candidates(
-    pool: &deadpool_postgres::Pool,
+fn find_hop_candidates(
+    books: &MarketBooks,
+    types: &[EligibleType],
     route: &PartialRoute,
     cargo_capacity_m3: f64,
     sales_tax_pct: f64,
     must_sell_at: Option<i32>,
     sell_corridor: Option<&[i32]>,
     opp_filters: &OpportunityFilters,
-    memo: &HopQueryMemo,
-) -> AppResult<Vec<HopCandidate>> {
+) -> Vec<HopCandidate> {
     let include_sell_system_ids = match (must_sell_at, sell_corridor) {
         (Some(id), _) => Some(vec![id]),
         (None, Some(corridor)) => Some(corridor.to_vec()),
@@ -518,7 +515,7 @@ async fn find_hop_candidates(
             // there, and that's exactly where the route now stands, about
             // to buy again. Without excluding it here too, every hop past
             // the first would require its own buy system AND forbid it in
-            // the same query -- a self-contradictory filter, guaranteed
+            // the same filter -- a self-contradictory filter, guaranteed
             // empty, silently capping every search at one hop regardless
             // of `max_legs`. `must_sell_at` gets the same exemption for the
             // same reason (see its doc comment above).
@@ -535,9 +532,6 @@ async fn find_hop_candidates(
         },
         buy_security_classes: opp_filters.buy_security_classes.clone(),
         sell_security_classes: opp_filters.sell_security_classes.clone(),
-        name_query: opp_filters.name_query.clone(),
-        category_ids: opp_filters.category_ids.clone(),
-        market_group_ids: opp_filters.market_group_ids.clone(),
         min_buy_price: opp_filters.min_buy_price,
         max_buy_price: opp_filters.max_buy_price,
         min_sell_price: opp_filters.min_sell_price,
@@ -549,31 +543,12 @@ async fn find_hop_candidates(
         cargo_capacity_m3: Some(cargo_capacity_m3),
         require_bid_exceeds_offer: true,
         sales_tax_pct,
-        exclude_illegal: opp_filters.exclude_illegal,
         ..Default::default()
     };
-    let key: HopQueryKey = (
-        route.current_system_id,
-        filter.include_sell_system_ids.clone(),
-        filter.exclude_system_ids.as_ref().map(|ids| {
-            let mut ids = ids.clone();
-            ids.sort_unstable();
-            ids.dedup();
-            ids
-        }),
-    );
-    let cached = memo.lock().unwrap().get(&key).cloned();
-    let opportunities = match cached {
-        Some(opps) => opps,
-        None => {
-            let opps = Arc::new(db::arbitrage::find_opportunities(pool, &filter).await?);
-            memo.lock().unwrap().insert(key, opps.clone());
-            opps
-        }
-    };
+    let opportunities = books.find_opportunities(types, &filter);
 
     let mut by_pair: HashMap<(i32, i32), Vec<ArbitrageOpportunity>> = HashMap::new();
-    for opp in opportunities.iter().cloned() {
+    for opp in opportunities {
         by_pair.entry((opp.buy_system_id, opp.sell_system_id)).or_default().push(opp);
     }
 
@@ -600,7 +575,7 @@ async fn find_hop_candidates(
 
     let mut candidates: Vec<HopCandidate> = per_pair_variants.into_iter().flat_map(|(_, variants)| variants).collect();
     candidates.sort_by(|a, b| b.hop_profit.partial_cmp(&a.hop_profit).unwrap_or(Ordering::Equal));
-    Ok(candidates)
+    candidates
 }
 
 /// Greedily fills the hold for one (buy, sell) pairing: sort its candidate
@@ -743,21 +718,19 @@ fn extend_route_with_hop(route: &PartialRoute, hop: HopCandidate) -> PartialRout
 /// max can only be >= a subset's), but needlessly loose for a
 /// `high_sec_only`/`low_sec_plus` search, where it would otherwise get
 /// dragged up by null-sec opportunities `dfs` could never actually select.
-async fn estimate_max_hop_profit(
-    pool: &deadpool_postgres::Pool,
+fn estimate_max_hop_profit(
+    books: &MarketBooks,
+    types: &[EligibleType],
     cargo_capacity_m3: f64,
     sales_tax_pct: f64,
     opp_filters: &OpportunityFilters,
-) -> AppResult<f64> {
+) -> f64 {
     let filter = ArbitrageFilter {
         cargo_capacity_m3: Some(cargo_capacity_m3),
         require_bid_exceeds_offer: true,
         sales_tax_pct,
         buy_security_classes: opp_filters.buy_security_classes.clone(),
         sell_security_classes: opp_filters.sell_security_classes.clone(),
-        name_query: opp_filters.name_query.clone(),
-        category_ids: opp_filters.category_ids.clone(),
-        market_group_ids: opp_filters.market_group_ids.clone(),
         min_buy_price: opp_filters.min_buy_price,
         max_buy_price: opp_filters.max_buy_price,
         min_sell_price: opp_filters.min_sell_price,
@@ -767,11 +740,9 @@ async fn estimate_max_hop_profit(
         min_volume_available: opp_filters.min_volume_available,
         max_total_cost: opp_filters.max_total_cost,
         exclude_system_ids: opp_filters.exclude_system_ids.clone(),
-        exclude_illegal: opp_filters.exclude_illegal,
         ..Default::default()
     };
-    let opportunities = db::arbitrage::find_opportunities(pool, &filter).await?;
-    Ok(opportunities.iter().filter_map(|o| o.trip_profit).fold(0.0, f64::max))
+    books.find_opportunities(types, &filter).iter().filter_map(|o| o.trip_profit).fold(0.0, f64::max)
 }
 
 struct PlanRoutesParams {
@@ -788,7 +759,9 @@ struct PlanRoutesParams {
 }
 
 /// Shared, read-only across the whole `dfs` recursion.
-struct DfsConfig {
+struct DfsConfig<'a> {
+    books: &'a MarketBooks,
+    types: &'a [EligibleType],
     cargo_capacity_m3: f64,
     max_legs: i32,
     sales_tax_pct: f64,
@@ -798,7 +771,6 @@ struct DfsConfig {
     max_hop_profit: f64,
     max_results: usize,
     opportunity_filters: OpportunityFilters,
-    hop_query_memo: HopQueryMemo,
 }
 
 /// If `route` is a genuine candidate result -- non-empty, and, when
@@ -843,8 +815,6 @@ fn prune_threshold(best: &[PartialRoute], max_results: usize) -> f64 {
     if best.len() >= max_results { best.last().map(|r| r.total_profit).unwrap_or(f64::NEG_INFINITY) } else { f64::NEG_INFINITY }
 }
 
-type BoxedDfs<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
-
 /// Branch-and-bound depth-first search: at `route`'s current position,
 /// record it as a candidate result (see `maybe_record`), then -- unless
 /// `max_legs` or the node budget is exhausted -- fetch every reachable
@@ -852,10 +822,10 @@ type BoxedDfs<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
 /// one's hold), and recurse into them **in best-first order**. Exploring
 /// the most promising branch first is what makes the pruning below
 /// effective: it tends to find a strong complete route early, which then
-/// lets later, weaker siblings get cut before ever costing a query.
+/// lets later, weaker siblings get cut before ever being expanded.
 ///
 /// The cut itself: a branch's `upper_bound` is `route`'s current profit,
-/// plus that specific hop's own (already-known, no query needed) profit,
+/// plus that specific hop's own (already-known, nothing to compute) profit,
 /// plus an optimistic ceiling for whatever legs would still remain after
 /// it (`remaining_legs * cfg.max_hop_profit`). If that bound can't beat
 /// `prune_threshold`, this branch -- and, since candidates are sorted by
@@ -874,52 +844,41 @@ type BoxedDfs<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
 /// against its siblings, not locked in early. `MAX_NODES_EXPLORED` is a
 /// separate, coarser backstop against the bound underperforming on a
 /// pathological request, not a normal ceiling.
-fn dfs<'a>(
-    pool: &'a deadpool_postgres::Pool,
-    route: PartialRoute,
-    depth: i32,
-    cfg: &'a DfsConfig,
-    best: &'a mut Vec<PartialRoute>,
-    nodes_explored: &'a mut usize,
-) -> BoxedDfs<'a> {
-    Box::pin(async move {
-        maybe_record(&route, cfg, best);
+fn dfs(route: PartialRoute, depth: i32, cfg: &DfsConfig, best: &mut Vec<PartialRoute>, nodes_explored: &mut usize) {
+    maybe_record(&route, cfg, best);
 
-        if depth >= cfg.max_legs || *nodes_explored >= MAX_NODES_EXPLORED {
-            return Ok(());
+    if depth >= cfg.max_legs || *nodes_explored >= MAX_NODES_EXPLORED {
+        return;
+    }
+
+    let must_sell_at = (cfg.return_to_start && depth == cfg.max_legs - 1).then_some(route.origin_system_id);
+    let candidates = find_hop_candidates(
+        cfg.books,
+        cfg.types,
+        &route,
+        cfg.cargo_capacity_m3,
+        cfg.sales_tax_pct,
+        must_sell_at,
+        cfg.sell_corridor.as_deref(),
+        &cfg.opportunity_filters,
+    );
+    *nodes_explored += 1;
+
+    let remaining_legs_after = (cfg.max_legs - depth - 1) as f64;
+    for hop in candidates {
+        if *nodes_explored >= MAX_NODES_EXPLORED {
+            break;
         }
-
-        let must_sell_at = (cfg.return_to_start && depth == cfg.max_legs - 1).then_some(route.origin_system_id);
-        let candidates = find_hop_candidates(
-            pool,
-            &route,
-            cfg.cargo_capacity_m3,
-            cfg.sales_tax_pct,
-            must_sell_at,
-            cfg.sell_corridor.as_deref(),
-            &cfg.opportunity_filters,
-            &cfg.hop_query_memo,
-        )
-        .await?;
-        *nodes_explored += 1;
-
-        let remaining_legs_after = (cfg.max_legs - depth - 1) as f64;
-        for hop in candidates {
-            if *nodes_explored >= MAX_NODES_EXPLORED {
-                break;
-            }
-            let upper_bound = route.total_profit + hop.hop_profit + remaining_legs_after * cfg.max_hop_profit;
-            if upper_bound <= prune_threshold(best, cfg.max_results) {
-                break;
-            }
-            let next = extend_route_with_hop(&route, hop);
-            dfs(pool, next, depth + 1, cfg, best, nodes_explored).await?;
+        let upper_bound = route.total_profit + hop.hop_profit + remaining_legs_after * cfg.max_hop_profit;
+        if upper_bound <= prune_threshold(best, cfg.max_results) {
+            break;
         }
-        Ok(())
-    })
+        let next = extend_route_with_hop(&route, hop);
+        dfs(next, depth + 1, cfg, best, nodes_explored);
+    }
 }
 
-async fn plan_routes(pool: deadpool_postgres::Pool, params: PlanRoutesParams) -> AppResult<Vec<RoutePlan>> {
+fn plan_routes(books: &MarketBooks, types: &[EligibleType], params: PlanRoutesParams) -> Vec<RoutePlan> {
     let PlanRoutesParams {
         start_system_id,
         target_system_id,
@@ -933,8 +892,10 @@ async fn plan_routes(pool: deadpool_postgres::Pool, params: PlanRoutesParams) ->
         opportunity_filters,
     } = params;
 
-    let max_hop_profit = estimate_max_hop_profit(&pool, cargo_capacity_m3, sales_tax_pct, &opportunity_filters).await?;
+    let max_hop_profit = estimate_max_hop_profit(books, types, cargo_capacity_m3, sales_tax_pct, &opportunity_filters);
     let cfg = DfsConfig {
+        books,
+        types,
         cargo_capacity_m3,
         max_legs,
         sales_tax_pct,
@@ -944,7 +905,6 @@ async fn plan_routes(pool: deadpool_postgres::Pool, params: PlanRoutesParams) ->
         max_hop_profit,
         max_results: max_results as usize,
         opportunity_filters,
-        hop_query_memo: Mutex::new(HashMap::new()),
     };
 
     let seed = PartialRoute {
@@ -967,18 +927,11 @@ async fn plan_routes(pool: deadpool_postgres::Pool, params: PlanRoutesParams) ->
 
     let mut best: Vec<PartialRoute> = Vec::new();
     let mut nodes_explored = 0usize;
-    dfs(&pool, seed, 0, &cfg, &mut best, &mut nodes_explored).await?;
-    tracing::info!(
-        nodes_explored,
-        hop_queries = cfg.hop_query_memo.lock().unwrap().len(),
-        routes = best.len(),
-        "route search finished"
-    );
+    dfs(seed, 0, &cfg, &mut best, &mut nodes_explored);
 
-    Ok(best
-        .into_iter()
+    best.into_iter()
         .map(|r| RoutePlan { total_cost: r.total_cost, total_profit: r.total_profit, total_jumps: None, legs: r.legs })
-        .collect())
+        .collect()
 }
 
 /// Same batching idea as routes/arbitrage.rs's `fill_jumps`: group every

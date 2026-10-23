@@ -1,6 +1,7 @@
 pub mod arbitrage;
 pub mod bootstrap;
 pub mod jumps;
+pub mod market_books;
 pub mod orders;
 pub mod search;
 pub mod taxonomy;
