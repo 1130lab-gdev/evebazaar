@@ -250,7 +250,7 @@ struct OpportunityFilters {
 /// as `Some(vec![])`, not silently dropped back to `None` -- that
 /// correctly matches no system at all, which is the right answer to a
 /// request that contradicts itself, not "ignore one of the two asks."
-fn intersect_classes(profile: Option<Vec<String>>, explicit: Vec<String>) -> Option<Vec<String>> {
+pub(crate) fn intersect_classes(profile: Option<Vec<String>>, explicit: Vec<String>) -> Option<Vec<String>> {
     let explicit = (!explicit.is_empty()).then_some(explicit);
     match (profile, explicit) {
         (Some(p), Some(e)) => Some(p.into_iter().filter(|c| e.contains(c)).collect()),
@@ -270,7 +270,7 @@ fn intersect_classes(profile: Option<Vec<String>>, explicit: Vec<String>) -> Opt
 /// `find_hop_candidates`/`estimate_max_hop_profit`) so a "high_sec_only"
 /// route can't end up buying or selling in low/null-sec on either side of
 /// any leg, including the first.
-fn allowed_security_classes(security_profile: Option<&str>) -> Option<Vec<String>> {
+pub(crate) fn allowed_security_classes(security_profile: Option<&str>) -> Option<Vec<String>> {
     match security_profile {
         Some("high_sec_only") => Some(vec!["highsec".to_string()]),
         Some("low_sec_plus") => Some(vec!["highsec".to_string(), "lowsec".to_string()]),

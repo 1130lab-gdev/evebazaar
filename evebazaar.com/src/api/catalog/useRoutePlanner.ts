@@ -8,7 +8,7 @@ export const defaultRoutePlannerParams: RoutePlannerParams = {
   startSystemId: null,
   targetSystemId: null,
   maxLegs: null,
-  securityProfile: '',
+  securityProfile: 'high_sec_only',
   salesTaxPct: null,
   returnToStart: false,
   nameQuery: '',

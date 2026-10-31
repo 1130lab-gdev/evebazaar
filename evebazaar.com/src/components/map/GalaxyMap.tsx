@@ -68,6 +68,10 @@ export interface GalaxyMapProps {
    * left of the built-in "Reset view" button -- e.g. a host's
    * expand/collapse toggle. */
   canvasActions?: ReactNode;
+  /** Starting value of the route `profile` picker -- e.g. the route
+   * planner's security setting, so the drawn path avoids the same space
+   * the search did. Still changeable in the map's own controls. */
+  initialRouteProfile?: RouteProfile | '';
 }
 
 export function GalaxyMap({
@@ -76,6 +80,7 @@ export function GalaxyMap({
   focusRoute,
   canvasHeight = 900,
   canvasActions,
+  initialRouteProfile = '',
 }: GalaxyMapProps = {}) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [hoveredId, setHoveredId] = useState<number | null>(null);
@@ -83,7 +88,7 @@ export function GalaxyMap({
   const [routeSourceId, setRouteSourceId] = useState<number | null>(null);
   const [routeTargetId, setRouteTargetId] = useState<number | null>(null);
   const [resetSignal, setResetSignal] = useState(0);
-  const [routeProfile, setRouteProfile] = useState<RouteProfile | ''>('');
+  const [routeProfile, setRouteProfile] = useState<RouteProfile | ''>(initialRouteProfile);
   // Warp speed / per-band weights / avoid list are collapsed by default so
   // the jump list isn't pushed down; profile stays visible as the one
   // knob most routes actually touch.

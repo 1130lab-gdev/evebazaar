@@ -13,6 +13,7 @@ import { GalaxyMap } from '../map/GalaxyMap';
 import { OrderBook } from '../market/OrderBook';
 import { SHIP_PRESETS } from '../../lib/shipPresets';
 import { ISK_BUDGET_OPTIONS, formatIskBudget } from '../../lib/iskBudget';
+import { SECURITY_PROFILE_OPTIONS } from '../../lib/securityProfile';
 import { RoutePlanCard } from './RoutePlanCard';
 import type {
   ArbitrageFilters,
@@ -273,6 +274,23 @@ export function RoutePlannerPage() {
       </div>
 
       <div className="field" style={{ margin: 0 }}>
+        <label>Security</label>
+        <select
+          value={filters.securityProfile}
+          onChange={(e) => updateFilters({ ...filters, securityProfile: e.target.value as ArbitrageFilters['securityProfile'] })}
+        >
+          {SECURITY_PROFILE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <p className="field-help" style={{ margin: '6px 0 0' }}>
+          Where the route may buy and sell, and which space the jump path between stops avoids.
+        </p>
+      </div>
+
+      <div className="field" style={{ margin: 0 }}>
         <label>Starting system</label>
         <select
           value={params.startSystemId ?? ''}
@@ -475,6 +493,7 @@ export function RoutePlannerPage() {
             <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
               <GalaxyMap
                 focusRoute={mapFocus}
+                initialRouteProfile={filters.securityProfile}
                 canvasHeight={mapExpanded ? '76vh' : 340}
                 canvasActions={
                   <button className="btn" onClick={() => setMapExpanded((v) => !v)}>

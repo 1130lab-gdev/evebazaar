@@ -24,7 +24,7 @@ export const defaultArbitrageFilters: ArbitrageFilters = {
   cargoCapacityM3: null,
   fromSystemId: null,
   maxJumpsFromLocation: null,
-  securityProfile: '',
+  securityProfile: 'high_sec_only',
   salesTaxPct: 7.5,
   requireBidExceedsOffer: true,
   excludeIllegal: false,

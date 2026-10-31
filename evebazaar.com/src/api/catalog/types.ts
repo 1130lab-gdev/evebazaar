@@ -168,8 +168,10 @@ export interface ArbitrageFilters {
   /** Only show opportunities whose buy system is within this many jumps of
    * `fromSystemId`. Ignored unless `fromSystemId` is also set. */
   maxJumpsFromLocation: number | null;
-  /** Biases both `jumps` and `distance_from_location` -- '' (default) is
-   * fewest jumps with no security preference. */
+  /** Hard constraint on where opportunities buy and sell (high_sec_only:
+   * 0.5+ only; low_sec_plus: excludes null-sec; '' anywhere), and biases
+   * `jumps` and `distance_from_location` to avoid the excluded space.
+   * Shared with the route planner's setting on the same page. */
   securityProfile: ArbitrageSecurityProfile | '';
   /** Percent EVE deducts from the sell side when a sell order fills.
    * Every profit figure the server returns (`profit_per_unit`,
@@ -234,11 +236,10 @@ export interface RoutePlannerParams {
   targetSystemId: number | null;
   /** Number of buy-sell hops. Defaults to 3 server-side, clamped to 3. */
   maxLegs: number | null;
-  /** Unlike the arbitrage scanner's identically-named field (which only
-   * biases reported jump counts), this is a hard constraint here:
-   * high_sec_only never buys or sells anywhere below 0.5 security,
-   * low_sec_plus additionally allows low-sec but still excludes null-sec.
-   * '' (default) applies no constraint. */
+  /** Hard constraint, same as the arbitrage scanner's identically-named
+   * field: high_sec_only never buys or sells anywhere below 0.5 security,
+   * low_sec_plus additionally allows low-sec but still excludes null-sec,
+   * '' applies no constraint. Also biases reported jump counts. */
   securityProfile: ArbitrageSecurityProfile | '';
   salesTaxPct: number | null;
   /** Forces the last leg to sell back into wherever the route started,

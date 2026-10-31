@@ -3,6 +3,7 @@ import type { ArbitrageFilters, SecurityClass } from '../../api/catalog/types';
 import type { SystemSummary } from '../../api/map/types';
 import { SystemPicker } from './SystemPicker';
 import { LocationPicker } from './LocationPicker';
+import { SECURITY_PROFILE_OPTIONS } from '../../lib/securityProfile';
 
 const SECURITY_CLASSES: SecurityClass[] = ['highsec', 'lowsec', 'nullsec'];
 
@@ -162,15 +163,17 @@ export function ArbitrageFilterPanel({
       </div>
 
       <div className="field" style={{ margin: 0 }}>
-        <label htmlFor="security-profile">Route security preference</label>
+        <label htmlFor="security-profile">Security</label>
         <select
           id="security-profile"
           value={filters.securityProfile}
           onChange={(e) => onChange({ ...filters, securityProfile: e.target.value as ArbitrageFilters['securityProfile'] })}
         >
-          <option value="">fewest jumps (default)</option>
-          <option value="high_sec_only">high_sec_only</option>
-          <option value="low_sec_plus">low_sec_plus</option>
+          {SECURITY_PROFILE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
         </select>
       </div>
 
