@@ -41,16 +41,13 @@ const TRADE_HUBS: { name: string; systemId: number }[] = [
 type MapFocus = { sourceSystemId: number; targetSystemId: number };
 type ViewTab = 'route' | 'opportunities';
 
-// Leg count is held at 3 for now -- search cost grows fast per extra leg.
-// The input still exists (1..3) but can't go higher. Result count is no
-// longer a knob: the server returns every profitable route it finds.
-const MAX_LEGS_CAP = 3;
+// Leg count is fixed at 3 on the public site, the same way the start system
+// is limited to the trade hubs -- search cost grows fast per extra leg, and
+// every plan() sends exactly this. Result count is no longer a knob: the
+// server returns every profitable route it finds.
+const ROUTE_LEGS = 3;
 
 const activeTabStyle = { borderColor: 'var(--accent-cyan)', color: 'var(--accent-cyan)' };
-
-function clampCap(value: number, cap: number): number {
-  return Math.min(cap, Math.max(1, Math.round(value)));
-}
 
 /** Full-screen order-book overlay for one item -- the "next to the map"
  * panel, opened by clicking an item name anywhere on this page. Its own
@@ -206,13 +203,7 @@ export function RoutePlannerPage() {
     openMap({ sourceSystemId: o.buy_system_id, targetSystemId: o.sell_system_id });
   }
 
-  const effectiveMaxLegs = params.maxLegs ?? MAX_LEGS_CAP;
-  const canReturnToStart = effectiveMaxLegs >= 2 && params.targetSystemId === null;
-
-  function setMaxLegs(value: number | null) {
-    const next = value === null ? null : clampCap(value, MAX_LEGS_CAP);
-    setParams({ ...params, maxLegs: next, returnToStart: params.returnToStart && (next ?? MAX_LEGS_CAP) >= 2 });
-  }
+  const canReturnToStart = params.targetSystemId === null;
 
   // returnToStart and targetSystemId are mutually exclusive server-side --
   // setting one here clears the other rather than leaving a stale value
@@ -226,7 +217,7 @@ export function RoutePlannerPage() {
   }
 
   function planRoute() {
-    plan({ ...params, ...filtersToRouteExtras(filters) });
+    plan({ ...params, ...filtersToRouteExtras(filters), maxLegs: ROUTE_LEGS });
   }
 
   const presetValue = SHIP_PRESETS.find((p) => p.cargoM3 === params.cargoCapacityM3)?.label ?? '';
@@ -313,17 +304,10 @@ export function RoutePlannerPage() {
       />
 
       <div className="field" style={{ margin: 0 }}>
-        <label>Max legs</label>
-        <input
-          type="number"
-          min={1}
-          max={MAX_LEGS_CAP}
-          placeholder={`${MAX_LEGS_CAP} (default)`}
-          value={params.maxLegs ?? ''}
-          onChange={(e) => setMaxLegs(e.target.value === '' ? null : Number(e.target.value))}
-        />
+        <label>Legs</label>
+        <input type="number" readOnly disabled value={ROUTE_LEGS} />
         <p className="field-help" style={{ margin: '6px 0 0' }}>
-          Maximum is {MAX_LEGS_CAP} for now.
+          Routes are planned with {ROUTE_LEGS} legs -- fixed for now.
         </p>
       </div>
 
@@ -343,8 +327,7 @@ export function RoutePlannerPage() {
       </button>
       {loading && (
         <p className="field-help" style={{ margin: 0 }}>
-          Longer searches (more max legs) can take a few seconds -- each additional leg deepens the search by
-          another level.
+          A {ROUTE_LEGS}-leg search can take a few seconds.
         </p>
       )}
     </div>
