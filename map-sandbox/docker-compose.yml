@@ -1,0 +1,18 @@
+# Explicit project name -- own name per project now that each project has
+# its own compose file.
+name: map-sandbox
+
+services:
+  # API base URL baked in at build time (browser-side code, not
+  # container-side), so it points at the *host*-mapped map-api port, not any
+  # container network.
+  map-sandbox:
+    container_name: map-sandbox
+    build:
+      context: .
+      args:
+        VITE_MAP_API_BASE_URL: ${VITE_MAP_API_BASE_URL:-http://localhost:8092}
+    image: map-sandbox:latest
+    ports:
+      - "5174:80"
+    restart: unless-stopped

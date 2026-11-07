@@ -15,14 +15,11 @@ pub struct Config {
     #[arg(long, env = "DATABASE_URL", default_value = "postgres://eve:eve@localhost:5532/eve")]
     pub database_url: String,
 
-    /// Postgres connection string for the `exchange` database (same
-    /// database exchange-webapi and risk use). Read-only: catalog-api
-    /// never writes exchange.* -- it only resolves a caller's Bearer key
-    /// to their role, same pattern as risk/src/db/exchange_reads.rs.
-    #[arg(
-        long,
-        env = "EXCHANGE_DATABASE_URL",
-        default_value = "postgres://postgres:postgres@localhost:5533/exchange"
-    )]
-    pub exchange_database_url: String,
+    /// Path prefix every route (API, Swagger UI, OpenAPI JSON) is served
+    /// under -- set to `/api/catalog` when this sits behind a shared-domain
+    /// reverse proxy that forwards `/api/catalog/*` here without stripping
+    /// the prefix. Empty (the default) serves at the root, as before. A
+    /// missing leading slash and any trailing slash are fixed up.
+    #[arg(long, env = "API_BASE_PATH", default_value = "")]
+    pub api_base_path: String,
 }

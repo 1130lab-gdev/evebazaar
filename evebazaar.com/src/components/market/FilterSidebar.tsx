@@ -1,11 +1,6 @@
 import type { OrderFilters, Region, SecurityClass } from '../../api/catalog/types';
 
 const SECURITY_CLASSES: SecurityClass[] = ['highsec', 'lowsec', 'nullsec'];
-const SIDES = [
-  { value: 'buy' as const, label: 'Buy' },
-  { value: 'sell' as const, label: 'Sell' },
-  { value: null, label: 'Both' },
-];
 
 export function FilterSidebar({
   regions,
@@ -32,27 +27,6 @@ export function FilterSidebar({
 
   return (
     <div className="panel panel--tight" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div className="field" style={{ margin: 0 }}>
-        <label>Side</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {SIDES.map(({ value, label }) => (
-            <button
-              key={label}
-              type="button"
-              className="btn"
-              style={{
-                flex: 1,
-                padding: '9px 0',
-                ...(filters.side === value ? { borderColor: 'var(--accent-cyan)', color: 'var(--accent-cyan)' } : {}),
-              }}
-              onClick={() => onChange({ ...filters, side: value })}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="field" style={{ margin: 0 }}>
         <label>Price range (ISK)</label>
         <div style={{ display: 'flex', gap: 8 }}>

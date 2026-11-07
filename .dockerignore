@@ -1,0 +1,26 @@
+# Build-context trimming for every image built with the repo root as
+# context (database/Dockerfile, via database/docker-compose.yml -- needs
+# the sibling rfesi/ crate, hence the root context). Docker does not read
+# .gitignore.
+**/target
+**/node_modules
+.git
+.run
+Containers
+**/.claude
+**/.env
+**/.env.*
+!**/.env.example
+*.log
+
+# Not needed by any root-context build (database/Dockerfile only copies
+# rfesi/ and database/).
+evebazaar.com
+map-sandbox
+tgi
+catalog-api
+map-api
+
+# The Postgres stack lives inside the crate dir but is its own compose
+# project -- keep it out of the Rust image's build context.
+database/database

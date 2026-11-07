@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let route_graph = graph::Graph::build(&pool).await?;
 
     let state = AppState::new(pool, Arc::new(route_graph));
-    let app = routes::build_router(state);
+    let app = routes::build_router(state, &config.api_base_path);
 
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     tracing::info!(addr = %config.listen_addr, "listening");

@@ -1,0 +1,10 @@
+target
+.env
+.env.*
+!.env.example
+docker-compose.yml
+.dockerignore
+Dockerfile
+Containers
+.claude
+*.log

@@ -23,11 +23,11 @@ pub struct PriceCheckRequest {
     pub sales_tax_pct: Option<f64>,
 }
 
-/// Re-quotes a batch of (previously saved or previewed) legs against the
-/// live market in one request -- stateless, so it works equally for a
-/// saved run's legs (`HaulerRunLeg`) and an in-memory route plan's legs
-/// (`RoutePlanLeg`) alike, both of which already have everything a leg
-/// needs here on hand. Results come back in the same order as `legs` was
+/// Re-quotes a batch of previously previewed legs against the live market
+/// in one request -- stateless, taking everything a leg needs (type, buy
+/// system, sell system, quantity) in the request body, so an in-memory
+/// route plan's legs (`RoutePlanLeg`) can be re-checked without anything
+/// being persisted. Results come back in the same order as `legs` was
 /// submitted so the caller can zip them back onto its own list by index
 /// rather than needing a shared id.
 #[utoipa::path(

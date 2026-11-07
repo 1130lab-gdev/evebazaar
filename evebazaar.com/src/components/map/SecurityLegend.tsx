@@ -1,16 +1,21 @@
 import { securityColor } from '../../lib/securityColor';
 
-const STOPS = [1.0, 0.8, 0.6, 0.5, 0.4, 0.2, 0.0, -0.5, -1.0];
+// Three flat bands rather than the full graduated scale -- enough to read
+// the map at a glance when the legend is overlaid on the canvas.
+const BANDS: { label: string; sec: number }[] = [
+  { label: 'High', sec: 0.5 },
+  { label: 'Low', sec: 0.3 },
+  { label: 'Null', sec: 0.0 },
+];
 
 export function SecurityLegend() {
   return (
     <div className="legend">
-      <label>security</label>
       <div className="legend-swatches">
-        {STOPS.map((s) => (
-          <div key={s} className="legend-swatch" title={s.toFixed(1)}>
-            <span className="legend-dot" style={{ background: securityColor(s) }} />
-            <span className="mono">{s.toFixed(1)}</span>
+        {BANDS.map((b) => (
+          <div key={b.label} className="legend-swatch">
+            <span className="legend-dot" style={{ background: securityColor(b.sec) }} />
+            <span className="mono">{b.label}</span>
           </div>
         ))}
       </div>

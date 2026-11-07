@@ -14,6 +14,7 @@ use crate::{
     },
     domain::ArbitrageOpportunity,
     error::AppResult,
+    routes::route_planner::{allowed_security_classes, intersect_classes},
     state::AppState,
 };
 
@@ -68,6 +69,10 @@ pub struct ArbitrageParams {
     /// -- silently defaulting to 0 would overstate real, take-home profit
     /// on every row.
     pub sales_tax_pct: Option<f64>,
+    /// When true, drop items that are illegal to haul in most of empire
+    /// space (boosters and slaves, matched by group name -- the only
+    /// stored signal). Defaults to false.
+    pub exclude_illegal: Option<bool>,
     /// One of `profit`, `profit_pct`, `volume`, `buy_price`, `sell_price`,
     /// `name`, `size`, `buy_system`, `sell_system`, `jumps`, `isk_per_jump`,
     /// `trip_profit`, `distance_from_location`. Defaults to `profit`.
@@ -89,6 +94,9 @@ pub struct ArbitrageParams {
     /// `profile` param. Biases both `jumps` (buy system to sell system) and
     /// `distance_from_location`: a hauler who won't fly through nullsec
     /// wants "how many jumps avoiding that", not the raw shortest path.
+    /// Also a hard constraint on where opportunities buy and sell, same as
+    /// the route planner's: intersected with `buy_security_class` /
+    /// `sell_security_class` (see `route_planner::intersect_classes`).
     pub security_profile: Option<String>,
 }
 
@@ -154,6 +162,7 @@ pub async fn list_opportunities(
     // arrays below and fill_jumps read from the same cached graph.
     let graph = state.jump_graph().await?;
     let multipliers = SecurityMultipliers::from_profile(params.security_profile.as_deref());
+    let allowed_classes = allowed_security_classes(params.security_profile.as_deref());
 
     // Precomputed here, not in SQL: Dijkstra over the stargate graph isn't
     // something a query against market_orders can do. A single
@@ -175,8 +184,8 @@ pub async fn list_opportunities(
         include_buy_system_ids: (!params.include_buy_system_id.is_empty()).then_some(params.include_buy_system_id),
         include_sell_system_ids: (!params.include_sell_system_id.is_empty()).then_some(params.include_sell_system_id),
         exclude_system_ids: (!params.exclude_system_id.is_empty()).then_some(params.exclude_system_id),
-        buy_security_classes: (!params.buy_security_class.is_empty()).then_some(params.buy_security_class),
-        sell_security_classes: (!params.sell_security_class.is_empty()).then_some(params.sell_security_class),
+        buy_security_classes: intersect_classes(allowed_classes.clone(), params.buy_security_class),
+        sell_security_classes: intersect_classes(allowed_classes, params.sell_security_class),
         min_buy_price: params.min_buy_price,
         max_buy_price: params.max_buy_price,
         min_sell_price: params.min_sell_price,
@@ -191,6 +200,7 @@ pub async fn list_opportunities(
         max_jumps_from_location,
         require_bid_exceeds_offer: params.require_bid_exceeds_offer.unwrap_or(true),
         sales_tax_pct: params.sales_tax_pct.unwrap_or(DEFAULT_SALES_TAX_PCT),
+        exclude_illegal: params.exclude_illegal.unwrap_or(false),
     };
     let mut opportunities = db::arbitrage::find_opportunities(&state.db, &filter).await?;
     fill_jumps(&mut opportunities, graph, multipliers);

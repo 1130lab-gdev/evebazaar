@@ -1,0 +1,41 @@
+# map-api -- read-only universe/route API.
+#
+# Runs the same on a dev box and on the VPS. The VPS never has the source
+# tree, so `build:` is only used locally; there it builds `map-api:latest`
+# and (via create-containers.sh / `docker compose push`) that image is
+# shipped to the box, which just pulls/loads and runs it.
+#
+#   local:  docker compose up -d --build
+#   VPS:    docker compose pull && docker compose up -d      (REGISTRY set in .env)
+#           -- or `docker load` a tar from create-containers.sh, then `up -d`
+#
+# Shares the external `evebazaar-network` bridge and reaches Postgres as
+# `evebazaar-database` on it. Create the network once:
+# `docker network create evebazaar-network` (start.sh does this for local dev).
+name: map-api
+
+networks:
+  evebazaar-network:
+    external: true
+
+services:
+  map-api:
+    container_name: map-api
+    image: ${REGISTRY:+${REGISTRY}/}map-api:${TAG:-latest}
+    build:
+      context: .
+    networks: [evebazaar-network]
+    ports:
+      - "127.0.0.1:8092:8092"
+    # Connection string assembled from POSTGRES_USER / POSTGRES_PASSWORD /
+    # POSTGRES_DB in map-api/.env (compose auto-loads it). USER and PASSWORD
+    # are required. POSTGRES_HOST / POSTGRES_PORT default to the evebazaar-database
+    # container on evebazaar-network. Set DATABASE_URL directly to override
+    # the whole string. Keep credentials in sync with database/database/.env.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:?set POSTGRES_USER in map-api/.env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in map-api/.env}@${POSTGRES_HOST:-evebazaar-database}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-eve}}
+      # Path prefix this service serves under, e.g. /api/map when a
+      # shared-domain proxy forwards /api/map/* here without stripping.
+      # Empty = serve at root (local dev).
+      API_BASE_PATH: ${API_BASE_PATH:-}
+    restart: unless-stopped
