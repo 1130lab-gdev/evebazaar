@@ -30,6 +30,13 @@ export function SiteHeader() {
           textTransform: 'uppercase',
         }}
       >
+        <img
+          src="/favicon.svg"
+          alt=""
+          width={24}
+          height={24}
+          style={{ imageRendering: 'pixelated' }}
+        />
         Eve Bazaar
       </Link>
 
